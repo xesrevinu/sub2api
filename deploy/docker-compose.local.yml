@@ -24,7 +24,17 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: public.ecr.aws/docker/library/node:24-alpine
+        GOLANG_IMAGE: public.ecr.aws/docker/library/golang:1.26.6-alpine
+        ALPINE_IMAGE: public.ecr.aws/docker/library/alpine:3.21
+        POSTGRES_IMAGE: public.ecr.aws/docker/library/postgres:18-alpine
+        VERSION: ${SUB2API_BUILD_VERSION:-local}
+        COMMIT: ${SUB2API_BUILD_COMMIT:-docker}
+    image: sub2api-local:${SUB2API_BUILD_VERSION:-local}
     container_name: sub2api
     restart: unless-stopped
     security_opt:
@@ -53,6 +63,7 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
+      - SERVER_SHUTDOWN_TIMEOUT=${SERVER_SHUTDOWN_TIMEOUT:-180}
       - ENABLE_SERVER_TIMING=${ENABLE_SERVER_TIMING:-false}
       - RUN_MODE=${RUN_MODE:-standard}
       - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
@@ -204,13 +215,12 @@ services:
         soft: 100000
         hard: 100000
     volumes:
-      # Local directory mapping for easy migration
-      - ./postgres_data:/var/lib/postgresql/data:Z
+      # PostgreSQL 18 stores data under a versioned subdirectory inside /var/lib/postgresql.
+      - ./postgres_data:/var/lib/postgresql
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-sub2api}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
-      - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
     networks:
       - sub2api-network
@@ -227,7 +237,7 @@ services:
   # Redis Cache
   # ===========================================================================
   redis:
-    image: redis:8-alpine
+    image: redis:7-alpine
     container_name: sub2api-redis
     restart: unless-stopped
     ulimits:
