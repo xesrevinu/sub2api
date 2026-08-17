@@ -397,6 +397,23 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultServerShutdownTimeout(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 180, cfg.Server.ShutdownTimeout)
+}
+
+func TestLoadServerShutdownTimeoutFromEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SERVER_SHUTDOWN_TIMEOUT", "240")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 240, cfg.Server.ShutdownTimeout)
+}
+
 func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
