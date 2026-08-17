@@ -1310,12 +1310,79 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platformArg ...string) ([]Account, error) {
+	platform := PlatformOpenAI
+	if len(platformArg) > 0 {
+		platform = platformArg[0]
+	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	if preferredGroupIDs := s.preferredOpenAISelectionGroupIDs(ctx, groupID, platform); len(preferredGroupIDs) > 0 {
+		accounts, err := s.listSchedulableAccountsByPreferredGroups(ctx, preferredGroupIDs, platform)
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) > 0 {
+			return accounts, nil
+		}
+	}
+	return s.loadSchedulableOpenAIAccounts(ctx, groupID, platform)
+}
+
+func (s *OpenAIGatewayService) preferredOpenAISelectionGroupIDs(ctx context.Context, groupID *int64, platform string) []int64 {
+	if groupID == nil || *groupID <= 0 || platform != PlatformOpenAI || !IsOpenAIForcePassthroughContext(ctx) {
+		return nil
+	}
+
+	currentGroup, ok := OpenAIRequestGroupFromContext(ctx)
+	if !ok || currentGroup == nil || currentGroup.ID != *groupID {
+		currentGroup, ok = s.lookupOpenAISelectionGroup(ctx, *groupID)
+	}
+	if !ok || currentGroup == nil || !strings.EqualFold(strings.TrimSpace(currentGroup.Platform), PlatformOpenAI) {
+		return nil
+	}
+
+	currentName := strings.TrimSpace(currentGroup.Name)
+	switch {
+	case strings.EqualFold(currentName, openAICompactRelayGroupName):
+		return []int64{*groupID}
+	case !strings.EqualFold(currentName, "openai"):
+		return nil
+	}
+
+	compactGroupID, ok := s.findActiveOpenAIGroupIDByName(ctx, openAICompactRelayGroupName)
+	if !ok || compactGroupID <= 0 || compactGroupID == *groupID {
+		return nil
+	}
+	return []int64{compactGroupID, *groupID}
+}
+
+func (s *OpenAIGatewayService) listSchedulableAccountsByPreferredGroups(ctx context.Context, groupIDs []int64, platform string) ([]Account, error) {
+	seen := make(map[int64]struct{}, len(groupIDs))
+	merged := make([]Account, 0)
+	for _, gid := range groupIDs {
+		if gid <= 0 {
+			continue
+		}
+		accounts, err := s.loadSchedulableOpenAIAccounts(ctx, &gid, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, account := range accounts {
+			if _, exists := seen[account.ID]; exists {
+				continue
+			}
+			seen[account.ID] = struct{}{}
+			merged = append(merged, account)
+		}
+	}
+	return merged, nil
+}
+
+func (s *OpenAIGatewayService) loadSchedulableOpenAIAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
-			return accounts, err
+			return nil, fmt.Errorf("query accounts failed: %w", err)
 		}
 		accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 		if platform == PlatformGrok {
@@ -1340,6 +1407,68 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
 	return accounts, nil
+}
+
+func (s *OpenAIGatewayService) lookupOpenAISelectionGroup(ctx context.Context, groupID int64) (*Group, bool) {
+	if groupID <= 0 {
+		return nil, false
+	}
+	if s.schedulerSnapshot != nil && s.schedulerSnapshot.groupRepo != nil {
+		group, err := s.schedulerSnapshot.groupRepo.GetByIDLite(ctx, groupID)
+		if err == nil && group != nil {
+			return group, true
+		}
+	}
+	if s.accountRepo == nil {
+		return nil, false
+	}
+	accounts, err := s.accountRepo.ListSchedulableByPlatform(ctx, PlatformOpenAI)
+	if err != nil {
+		return nil, false
+	}
+	for i := range accounts {
+		for _, group := range accounts[i].Groups {
+			if group != nil && group.ID == groupID {
+				return group, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func (s *OpenAIGatewayService) findActiveOpenAIGroupIDByName(ctx context.Context, groupName string) (int64, bool) {
+	trimmedName := strings.TrimSpace(groupName)
+	if trimmedName == "" {
+		return 0, false
+	}
+	if s.schedulerSnapshot != nil && s.schedulerSnapshot.groupRepo != nil {
+		groups, err := s.schedulerSnapshot.groupRepo.ListActiveByPlatform(ctx, PlatformOpenAI)
+		if err == nil {
+			for i := range groups {
+				if strings.EqualFold(strings.TrimSpace(groups[i].Name), trimmedName) {
+					return groups[i].ID, true
+				}
+			}
+		}
+	}
+	if s.accountRepo == nil {
+		return 0, false
+	}
+	accounts, err := s.accountRepo.ListSchedulableByPlatform(ctx, PlatformOpenAI)
+	if err != nil {
+		return 0, false
+	}
+	for i := range accounts {
+		for _, group := range accounts[i].Groups {
+			if group == nil || !strings.EqualFold(strings.TrimSpace(group.Platform), PlatformOpenAI) ||
+				!strings.EqualFold(strings.TrimSpace(group.Name), trimmedName) ||
+				(group.Status != "" && group.Status != StatusActive) {
+				continue
+			}
+			return group.ID, true
+		}
+	}
+	return 0, false
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {

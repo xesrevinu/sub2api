@@ -1034,8 +1034,13 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 		return
 	}
 	eventType := gjson.GetBytes(data, "type").String()
-	if eventType != "response.completed" && eventType != "response.done" && eventType != "response.failed" &&
-		eventType != "response.incomplete" && eventType != "response.cancelled" && eventType != "response.canceled" {
+	isResponsesTerminal := eventType == "response.completed" || eventType == "response.done" || eventType == "response.failed" ||
+		eventType == "response.incomplete" || eventType == "response.cancelled" || eventType == "response.canceled"
+	// The fork's raw /v1/chat/completions relay receives usage in a final
+	// chat.completion.chunk with empty choices and no Responses event type.
+	isChatCompletionsUsageChunk := strings.HasPrefix(gjson.GetBytes(data, "object").String(), "chat.completion") &&
+		gjson.GetBytes(data, "usage").IsObject()
+	if !isResponsesTerminal && !isChatCompletionsUsageChunk {
 		return
 	}
 

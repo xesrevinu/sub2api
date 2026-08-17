@@ -103,6 +103,21 @@ func clearOpenAIResponsesClientToolMapping(c *gin.Context) {
 	}
 }
 
+// ForwardPassthrough exposes the native passthrough pipeline to the fork's
+// relay handlers while retaining the upstream implementation and accounting.
+func (s *OpenAIGatewayService) ForwardPassthrough(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	reqModel string,
+	reqStream bool,
+	startTime time.Time,
+) (*OpenAIForwardResult, error) {
+	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, reqModel)
+	return s.forwardOpenAIPassthrough(ctx, c, account, body, nil, reqModel, false, reasoningEffort, reqStream, startTime)
+}
+
 func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	ctx context.Context,
 	c *gin.Context,
@@ -465,10 +480,12 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
-	targetURL := openaiPlatformAPIURL
+	// API-key passthrough keeps the original OpenAI-compatible method, path and
+	// query. OAuth accounts remain bound to ChatGPT's Responses-only endpoint.
+	targetURL := buildOpenAIPassthroughTargetURL(openaiPlatformAPIURL, openAIPassthroughRequestPath(c))
 	switch account.Type {
 	case AccountTypeOAuth:
-		targetURL = chatgptCodexURL
+		targetURL = appendOpenAIResponsesRequestPathSuffix(chatgptCodexURL, openAIResponsesRequestPathSuffix(c))
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()
 		if baseURL != "" {
@@ -476,19 +493,31 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			if err != nil {
 				return nil, err
 			}
-			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
+			requestPath := openAIPassthroughRequestPath(c)
+			if strings.Contains(requestPath, "/responses") {
+				targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
+				targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+			} else {
+				targetURL = buildOpenAIPassthroughTargetURL(validatedURL, requestPath)
+			}
 		}
 	}
-	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
 	// DeepSeek 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	method := http.MethodPost
+	if c != nil && c.Request != nil && strings.TrimSpace(c.Request.Method) != "" {
+		method = c.Request.Method
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		req.URL.RawQuery = c.Request.URL.RawQuery
+	}
 
 	// 透传客户端请求头（安全白名单）。
 	allowTimeoutHeaders := s.isOpenAIPassthroughTimeoutHeadersAllowed()
@@ -602,6 +631,53 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 
 	return req, nil
+}
+
+func buildOpenAIPassthroughTargetURL(baseURL, requestPath string) string {
+	normalizedBase := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	normalizedPath := strings.TrimSpace(requestPath)
+	if normalizedBase == "" || normalizedPath == "" {
+		return normalizedBase
+	}
+	if !strings.HasPrefix(normalizedPath, "/") {
+		normalizedPath = "/" + normalizedPath
+	}
+	if strings.HasSuffix(normalizedBase, normalizedPath) {
+		return normalizedBase
+	}
+	// The built-in default is a full /v1/responses endpoint. For a generic
+	// relay path, join at the API root instead of appending after /responses.
+	if idx := strings.LastIndex(normalizedBase, "/v1/"); idx >= 0 && strings.HasPrefix(normalizedPath, "/v1/") {
+		return normalizedBase[:idx] + normalizedPath
+	}
+	if strings.HasPrefix(normalizedPath, "/v1/") && strings.HasSuffix(normalizedBase, "/v1") {
+		return normalizedBase + strings.TrimPrefix(normalizedPath, "/v1")
+	}
+	return normalizedBase + normalizedPath
+}
+
+func openAIPassthroughRequestPath(c *gin.Context) string {
+	const (
+		openAIResponsesPath       = "/v1/responses"
+		openAIChatCompletionsPath = "/v1/chat/completions"
+	)
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return openAIResponsesPath
+	}
+	normalizedPath := strings.TrimRight(strings.TrimSpace(c.Request.URL.Path), "/")
+	switch {
+	case normalizedPath == "", normalizedPath == "/responses", normalizedPath == openAIResponsesPath:
+		return openAIResponsesPath
+	case strings.HasSuffix(normalizedPath, "/chat/completions"):
+		return openAIChatCompletionsPath
+	case strings.Contains(normalizedPath, "/responses"):
+		return openAIResponsesPath + openAIResponsesRequestPathSuffix(c)
+	default:
+		if !strings.HasPrefix(normalizedPath, "/") {
+			return "/" + normalizedPath
+		}
+		return normalizedPath
+	}
 }
 
 func stripOpenAILegacyResponsesBeta(headers http.Header) {

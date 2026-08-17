@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -94,7 +95,14 @@ func (r stubOpenAIAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*Ac
 func (r stubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {
-		if acc.Platform == platform {
+		if acc.Platform != platform {
+			continue
+		}
+		if len(acc.GroupIDs) == 0 && len(acc.AccountGroups) == 0 && len(acc.Groups) == 0 {
+			result = append(result, acc)
+			continue
+		}
+		if accountHasGroupID(acc, groupID) {
 			result = append(result, acc)
 		}
 	}
@@ -109,6 +117,89 @@ func (r stubOpenAIAccountRepo) ListSchedulableByPlatform(ctx context.Context, pl
 		}
 	}
 	return result, nil
+}
+
+type stubOpenAIGroupRepo struct {
+	groups []Group
+}
+
+func (r stubOpenAIGroupRepo) Create(ctx context.Context, group *Group) error { return nil }
+func (r stubOpenAIGroupRepo) GetByID(ctx context.Context, id int64) (*Group, error) {
+	for i := range r.groups {
+		if r.groups[i].ID == id {
+			group := r.groups[i]
+			return &group, nil
+		}
+	}
+	return nil, ErrGroupNotFound
+}
+func (r stubOpenAIGroupRepo) GetByIDLite(ctx context.Context, id int64) (*Group, error) {
+	return r.GetByID(ctx, id)
+}
+func (r stubOpenAIGroupRepo) Update(ctx context.Context, group *Group) error { return nil }
+func (r stubOpenAIGroupRepo) Delete(ctx context.Context, id int64) error     { return nil }
+func (r stubOpenAIGroupRepo) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
+	return nil, nil
+}
+func (r stubOpenAIGroupRepo) List(ctx context.Context, params pagination.PaginationParams) ([]Group, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
+func (r stubOpenAIGroupRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]Group, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
+func (r stubOpenAIGroupRepo) ListActive(ctx context.Context) ([]Group, error) {
+	return append([]Group(nil), r.groups...), nil
+}
+func (r stubOpenAIGroupRepo) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
+	var result []Group
+	for i := range r.groups {
+		if r.groups[i].Platform == platform && (r.groups[i].Status == "" || r.groups[i].Status == StatusActive) {
+			result = append(result, r.groups[i])
+		}
+	}
+	return result, nil
+}
+func (r stubOpenAIGroupRepo) ExistsByName(ctx context.Context, name string) (bool, error) {
+	for i := range r.groups {
+		if r.groups[i].Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (r stubOpenAIGroupRepo) GetAccountCount(ctx context.Context, groupID int64) (int64, int64, error) {
+	return 0, 0, nil
+}
+func (r stubOpenAIGroupRepo) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
+	return 0, nil
+}
+func (r stubOpenAIGroupRepo) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	return nil, nil
+}
+func (r stubOpenAIGroupRepo) BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error {
+	return nil
+}
+func (r stubOpenAIGroupRepo) UpdateSortOrders(ctx context.Context, updates []GroupSortOrderUpdate) error {
+	return nil
+}
+
+func accountHasGroupID(acc Account, groupID int64) bool {
+	for _, id := range acc.GroupIDs {
+		if id == groupID {
+			return true
+		}
+	}
+	for _, accountGroup := range acc.AccountGroups {
+		if accountGroup.GroupID == groupID {
+			return true
+		}
+	}
+	for _, group := range acc.Groups {
+		if group != nil && group.ID == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r stubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
@@ -331,6 +422,101 @@ func (c stubConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts
 		out[acc.ID] = &AccountLoadInfo{AccountID: acc.ID, LoadRate: 0}
 	}
 	return out, nil
+}
+
+func TestOpenAIGatewayService_ListSchedulableAccounts_PrefersCompactGroupForRelayPassthrough(t *testing.T) {
+	groupID := int64(2)
+	compactGroupID := int64(4)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          101,
+				Name:        "primary-openai",
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Groups: []*Group{
+					{ID: groupID, Name: "openai", Platform: PlatformOpenAI, Status: StatusActive},
+				},
+			},
+			{
+				ID:          202,
+				Name:        "compact-openai-like",
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Groups: []*Group{
+					{ID: compactGroupID, Name: openAICompactRelayGroupName, Platform: PlatformOpenAI, Status: StatusActive},
+				},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+
+	accounts, err := svc.listSchedulableAccounts(WithOpenAIForcePassthrough(context.Background()), &groupID)
+	require.NoError(t, err)
+	require.Len(t, accounts, 2)
+	require.Equal(t, int64(202), accounts[0].ID)
+	require.Equal(t, int64(101), accounts[1].ID)
+}
+
+func TestOpenAIGatewayService_ListSchedulableAccounts_FallsBackWhenCompactGroupMissing(t *testing.T) {
+	groupID := int64(2)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          101,
+				Name:        "primary-openai",
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Groups: []*Group{
+					{ID: groupID, Name: "openai", Platform: PlatformOpenAI, Status: StatusActive},
+				},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+
+	accounts, err := svc.listSchedulableAccounts(WithOpenAIForcePassthrough(context.Background()), &groupID)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, int64(101), accounts[0].ID)
+}
+
+func TestOpenAIGatewayService_ListSchedulableAccounts_DoesNotPreferCompactWithoutRelayPassthrough(t *testing.T) {
+	groupID := int64(2)
+	compactGroupID := int64(4)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          101,
+				Name:        "primary-openai",
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Groups: []*Group{
+					{ID: groupID, Name: "openai", Platform: PlatformOpenAI, Status: StatusActive},
+				},
+			},
+			{
+				ID:          202,
+				Name:        "compact-openai-like",
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Groups: []*Group{
+					{ID: compactGroupID, Name: openAICompactRelayGroupName, Platform: PlatformOpenAI, Status: StatusActive},
+				},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+
+	accounts, err := svc.listSchedulableAccounts(context.Background(), &groupID)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, int64(101), accounts[0].ID)
 }
 
 func TestOpenAIGatewayService_GenerateSessionHash_Priority(t *testing.T) {
@@ -2609,6 +2795,43 @@ func TestOpenAIStreamingPassthroughResponseIncompleteWithoutDoneMarkerStillSucce
 	require.Equal(t, 1, result.usage.CacheReadInputTokens)
 }
 
+func TestOpenAIStreamingPassthroughChatCompletionsUsageChunkCaptured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			MaxLineSize: defaultMaxLineSize,
+		},
+	}
+	svc := &OpenAIGatewayService{cfg: cfg}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	pr, pw := io.Pipe()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       pr,
+		Header:     http.Header{},
+	}
+
+	go func() {
+		defer func() { _ = pw.Close() }()
+		_, _ = pw.Write([]byte("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":34,\"prompt_tokens_details\":{\"cached_tokens\":5}}}\n\n"))
+		_, _ = pw.Write([]byte("data: [DONE]\n\n"))
+	}()
+
+	result, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+	_ = pr.Close()
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.usage)
+	require.Equal(t, 12, result.usage.InputTokens)
+	require.Equal(t, 34, result.usage.OutputTokens)
+	require.Equal(t, 5, result.usage.CacheReadInputTokens)
+}
+
 func TestOpenAIStreamingTooLong(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
@@ -2930,6 +3153,31 @@ func TestOpenAIResponsesRequestPathSuffix(t *testing.T) {
 	}
 }
 
+func TestOpenAIPassthroughRequestPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "responses canonicalized", path: "/responses", want: "/v1/responses"},
+		{name: "responses suffix preserved", path: "/v1/responses/compact", want: "/v1/responses/compact"},
+		{name: "chat completions canonicalized", path: "/chat/completions", want: "/v1/chat/completions"},
+		{name: "raw models path preserved", path: "/v1/models", want: "/v1/models"},
+		{name: "raw files path preserved", path: "/v1/files/file-123", want: "/v1/files/file-123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c.Request = httptest.NewRequest(http.MethodGet, tt.path, nil)
+			require.Equal(t, tt.want, openAIPassthroughRequestPath(c))
+		})
+	}
+}
+
 func TestNormalizeOpenAICompactRequestBodyPreservesCurrentCodexPayloadFields(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","input":[{"type":"message","role":"user","content":"compact me"}],"instructions":"compact-test","tools":[{"type":"function","name":"shell"}],"parallel_tool_calls":true,"reasoning":{"effort":"high"},"text":{"verbosity":"low"},"previous_response_id":"resp_123","store":true,"stream":true,"prompt_cache_key":"cache_123"}`)
 
@@ -3051,6 +3299,51 @@ func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testi
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", false)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/v1/responses/compact", req.URL.String())
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesChatCompletionsPathForAPIKeyBaseURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"grok-4.1"}`)))
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		},
+	}}
+	account := &Account{
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Credentials: map[string]any{"base_url": "https://example.com/v1"},
+	}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"grok-4.1"}`), "token")
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/v1/chat/completions", req.URL.String())
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesRawMethodPathAndQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models?limit=20&after=model_123", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		},
+	}}
+	account := &Account{
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Credentials: map[string]any{"base_url": "https://example.com"},
+	}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, nil, "token")
+	require.NoError(t, err)
+	require.Equal(t, http.MethodGet, req.Method)
+	require.Equal(t, "https://example.com/v1/models?limit=20&after=model_123", req.URL.String())
 }
 
 func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
@@ -3376,6 +3669,22 @@ func TestExtractOpenAISSEDataLine(t *testing.T) {
 			require.Equal(t, tt.wantData, got)
 		})
 	}
+}
+
+func TestExtractOpenAIUsageFromJSONBytesSupportsChatCompletionsUsage(t *testing.T) {
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"id":"chatcmpl-1","usage":{"prompt_tokens":12,"completion_tokens":34,"prompt_tokens_details":{"cached_tokens":5}}}`))
+	require.True(t, ok)
+	require.Equal(t, 12, usage.InputTokens)
+	require.Equal(t, 34, usage.OutputTokens)
+	require.Equal(t, 5, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIUsageFromJSONBytesSupportsResponsesSSEUsage(t *testing.T) {
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"type":"response.done","response":{"usage":{"input_tokens":12,"output_tokens":34,"input_tokens_details":{"cached_tokens":5}}}}`))
+	require.True(t, ok)
+	require.Equal(t, 12, usage.InputTokens)
+	require.Equal(t, 34, usage.OutputTokens)
+	require.Equal(t, 5, usage.CacheReadInputTokens)
 }
 
 func TestParseSSEUsage_SelectiveParsing(t *testing.T) {

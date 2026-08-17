@@ -312,7 +312,31 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		rawPath = c.Request.URL.Path
 	}
+	if platform == service.PlatformOpenAI && service.IsOpenAIForcePassthrough(c) {
+		// Relay passthrough requests must log the real upstream path we used.
+		// OpenAI-compatible providers in the compact group may support
+		// /v1/chat/completions but not /v1/responses, so usage/audit logs should
+		// reflect the preserved legacy path instead of the normalized endpoint.
+		return deriveOpenAIPassthroughUpstreamEndpoint(rawPath)
+	}
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
+}
+
+func deriveOpenAIPassthroughUpstreamEndpoint(rawPath string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(rawPath), "/")
+	switch {
+	case normalized == "", normalized == "/responses", normalized == EndpointResponses:
+		return EndpointResponses
+	case strings.HasSuffix(normalized, "/chat/completions"):
+		return EndpointChatCompletions
+	case strings.Contains(normalized, "/responses"):
+		if suffix := responsesSubpathSuffix(normalized); suffix != "" {
+			return EndpointResponses + suffix
+		}
+		return EndpointResponses
+	default:
+		return NormalizeInboundEndpoint(normalized)
+	}
 }
 
 func setActualUpstreamEndpoint(c *gin.Context, endpoint string) {
