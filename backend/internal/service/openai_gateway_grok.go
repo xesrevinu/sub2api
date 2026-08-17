@@ -83,7 +83,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	}
 	cacheIdentity := resolveGrokCacheIdentity(c, cacheIdentityBody, "", upstreamModel)
 	mixedCacheIntentBody := append([]byte(nil), patchedBody...)
-	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, account.IsGrokOAuth())
+	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, grokFreeCacheInjectionEnabled(account))
 	if err != nil {
 		return nil, fmt.Errorf("apply grok prompt cache identity: %w", err)
 	}
@@ -1582,9 +1582,14 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileGrok))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
+	if gjson.GetBytes(body, "stream").Bool() {
+		req.Header.Set("Accept", "text/event-stream")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
 	if account.IsGrokOAuth() {
-		applyGrokCLIHeaders(req.Header)
+		model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+		applyGrokOAuthInferenceHeaders(req.Header, account, model, cacheIdentity)
 	}
 	applyGrokCacheHeaders(req.Header, cacheIdentity)
 	if c != nil {
@@ -1603,16 +1608,7 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 // Identity pins come from package xai so service-layer headers match the final
 // transport rewrite on cli-chat-proxy.grok.com.
 func applyGrokCLIHeaders(headers http.Header) {
-	if headers == nil {
-		return
-	}
-	version := xai.ResolveCLIVersion()
-	headers.Set("User-Agent", xai.CLIUserAgent(version))
-	headers.Set("X-Grok-Client-Version", version)
-	headers.Set("x-grok-client-version", version)
-	headers.Set("x-grok-client-identifier", xai.CLIClientIdentifier)
-	// Historical mode value expected by some unit tests / older CLI probes.
-	headers.Set("X-Grok-Client-Mode", "interactive")
+	xai.ApplyCLIIdentityHeaders(headers, xai.ResolveCLIVersion())
 }
 
 func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, account *Account, snapshot *xai.QuotaSnapshot) {

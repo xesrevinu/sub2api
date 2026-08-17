@@ -169,7 +169,7 @@ func (s *GrokQuotaService) probeUsage(ctx context.Context, accountID int64) (*Gr
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if account.IsGrokOAuth() {
-		applyGrokCLIHeaders(req.Header)
+		applyGrokOAuthInferenceHeaders(req.Header, account, probeModel, "")
 	}
 	// 探测请求与真实转发保持同一套账号级请求头覆写，避免探测通过但转发失败。
 	account.ApplyHeaderOverrides(req.Header)
@@ -390,6 +390,7 @@ func (s *GrokQuotaService) fetchBilling(
 			return nil, 0, infraerrors.Newf(http.StatusInternalServerError, "GROK_QUOTA_PROBE_REQUEST_BUILD_FAILED", "failed to build billing request: %v", err)
 		}
 		xai.ApplyCLIBillingHeaders(req, token)
+		applyGrokCLIAccountHeaders(req.Header, account)
 		// billing 探测与真实转发保持同一套账号级请求头覆写。
 		account.ApplyHeaderOverrides(req.Header)
 		resp, requestErr := s.httpUpstream.Do(req, proxyURL, account.ID, maxInt(account.Concurrency, 2))

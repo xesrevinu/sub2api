@@ -84,7 +84,8 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	// Match media path: CLI identity headers only on the CLI chat proxy.
 	// Official api.x.ai voice rejects or mistreats OAuth when CLI headers are stamped.
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(targetURL) {
-		applyGrokCLIHeaders(req.Header)
+		model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+		applyGrokOAuthInferenceHeaders(req.Header, account, model, "")
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
@@ -175,7 +176,7 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	u.RawQuery = q.Encode()
 	headers := http.Header{"Authorization": []string{"Bearer " + token}}
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(u.String()) {
-		applyGrokCLIHeaders(headers)
+		applyGrokOAuthInferenceHeaders(headers, account, firstNonEmpty(model, "grok-voice-latest"), "")
 	}
 	account.ApplyHeaderOverrides(headers)
 	proxyURL := ""
@@ -280,7 +281,7 @@ func (s *OpenAIGatewayService) ProbeGrokRealtime(ctx context.Context, account *A
 	u.RawQuery = q.Encode()
 	headers := http.Header{"Authorization": []string{"Bearer " + token}}
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(u.String()) {
-		applyGrokCLIHeaders(headers)
+		applyGrokOAuthInferenceHeaders(headers, account, firstNonEmpty(model, "grok-voice-latest"), "")
 	}
 	account.ApplyHeaderOverrides(headers)
 	proxyURL := ""

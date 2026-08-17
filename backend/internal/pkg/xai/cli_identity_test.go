@@ -36,6 +36,12 @@ func TestResolveCLIVersionRejectsUnsafeOrTooOld(t *testing.T) {
 	}
 }
 
+func TestCLIUserAgentMatchesLocalGrokBuild(t *testing.T) {
+	require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", CLIUserAgent(""))
+	require.Equal(t, "grok-pager", CLIClientIdentifier)
+	require.Equal(t, "interactive", CLIClientMode)
+}
+
 func TestApplyCLIProxyHeaders(t *testing.T) {
 	t.Setenv(CLIVersionEnv, "")
 
@@ -47,8 +53,11 @@ func TestApplyCLIProxyHeaders(t *testing.T) {
 
 	require.Equal(t, CLIClientVersion, req.Header.Get("x-grok-client-version"))
 	require.Equal(t, CLIClientIdentifier, req.Header.Get("x-grok-client-identifier"))
+	require.Equal(t, CLIClientMode, req.Header.Get("x-grok-client-mode"))
+	require.Equal(t, CLIAuthenticateResponse, req.Header.Get("x-authenticateresponse"))
 	require.Equal(t, CLITokenAuth, req.Header.Get("X-XAI-Token-Auth"))
 	require.Equal(t, CLIUserAgent(CLIClientVersion), req.Header.Get("User-Agent"))
+	require.Equal(t, CLIAcceptEncoding, req.Header.Get("Accept-Encoding"))
 }
 
 func TestApplyCLIProxyHeadersLeavesAPIHostUnchanged(t *testing.T) {
