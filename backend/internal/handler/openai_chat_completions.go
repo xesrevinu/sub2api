@@ -48,6 +48,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
+	service.BindOpenAIRequestGroup(c, apiKey.Group)
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
@@ -235,11 +236,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
-
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -247,7 +243,18 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
+			if service.IsOpenAIForcePassthrough(c) {
+				return h.gatewayService.ForwardPassthrough(c.Request.Context(), c, account, body, reqModel, reqStream, forwardStart)
+			}
+			defaultMappedModel := ""
+			if apiKey.Group != nil {
+				defaultMappedModel = apiKey.Group.DefaultMappedModel
+			}
+			forwardBody := body
+			if channelMapping.Mapped {
+				forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+			}
+			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {

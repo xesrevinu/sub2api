@@ -55,6 +55,7 @@ const (
 	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
 	openAIWSRetryJitterRatioDefault    = 0.2
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
+	openAICompactRelayGroupName        = "openai-compact"
 	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
 	// codexCLIVersion 是网关对上游声明的 Codex 客户端版本，同时供 codexCLIUserAgent
 	// 与 version 头使用。上游 /backend-api/codex 在容量紧张时按客户端身份分优先级降载，

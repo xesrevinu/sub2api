@@ -398,6 +398,11 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.ChatCompletions(c)
 	})
+	// OpenAI relay alias: preserve pure passthrough semantics while keeping usage accounting.
+	// Fork-specific behavior: /api/relay/openai/openai/* is a generic OpenAI-like proxy,
+	// so we register Any here instead of only GET/POST to keep the original method.
+	r.Any("/api/relay/openai", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.RelayOpenAI)
+	r.Any("/api/relay/openai/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.RelayOpenAI)
 	rootRoute(http.MethodPost, "/embeddings", textBodyLimit, func(c *gin.Context) {
 		if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
