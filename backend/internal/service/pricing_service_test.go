@@ -587,6 +587,108 @@ func TestGetModelPricing_Gpt54NanoUsesDedicatedStaticFallbackWhenRemoteMissing(t
 	require.Zero(t, got.LongContextInputTokenThreshold)
 }
 
+func TestGetModelPricing_DeepSeekV3AliasesToDeepSeekChat(t *testing.T) {
+	deepseekPricing := &LiteLLMModelPricing{InputCostPerToken: 2.8e-7}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"deepseek-chat": deepseekPricing,
+		},
+	}
+
+	got := svc.GetModelPricing("deepseek-v3")
+	require.Same(t, deepseekPricing, got)
+}
+
+func TestGetModelPricing_DeepSeekAliasesToCanonicalModels(t *testing.T) {
+	deepseekChatPricing := &LiteLLMModelPricing{InputCostPerToken: 2.8e-7}
+	deepseekReasonerPricing := &LiteLLMModelPricing{InputCostPerToken: 2.8e-7, OutputCostPerToken: 4.2e-7}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"deepseek-chat":     deepseekChatPricing,
+			"deepseek-reasoner": deepseekReasonerPricing,
+		},
+	}
+
+	require.Same(t, deepseekChatPricing, svc.GetModelPricing("deepseek-v3-0324"))
+	require.Same(t, deepseekChatPricing, svc.GetModelPricing("deepseek-coder"))
+	require.Same(t, deepseekReasonerPricing, svc.GetModelPricing("deepseek-r1-0528"))
+}
+
+func TestGetModelPricing_Grok41AliasesToGrok4Family(t *testing.T) {
+	grokPricing := &LiteLLMModelPricing{InputCostPerToken: 3e-6}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"grok-4-0709": grokPricing,
+		},
+	}
+
+	got := svc.GetModelPricing("grok-4.1")
+	require.Same(t, grokPricing, got)
+}
+
+func TestGetModelPricing_OpenAIAliasesToCanonicalModels(t *testing.T) {
+	o1Pricing := &LiteLLMModelPricing{InputCostPerToken: 15e-6}
+	gpt4oPricing := &LiteLLMModelPricing{InputCostPerToken: 2.5e-6}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"o1-2024-12-17": o1Pricing,
+			"gpt-4o":        gpt4oPricing,
+		},
+	}
+
+	require.Same(t, o1Pricing, svc.GetModelPricing("o1"))
+	require.Same(t, gpt4oPricing, svc.GetModelPricing("chatgpt-4o-latest"))
+}
+
+func TestGetModelPricing_GeminiAliasesToCanonicalModels(t *testing.T) {
+	flashPricing := &LiteLLMModelPricing{InputCostPerToken: 5e-7}
+	flashThinkingPricing := &LiteLLMModelPricing{InputCostPerToken: 3e-7}
+	proImagePricing := &LiteLLMModelPricing{OutputCostPerImage: 0.134}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gemini-3-flash-preview":     flashPricing,
+			"gemini-2.5-flash":           flashThinkingPricing,
+			"gemini-3-pro-image-preview": proImagePricing,
+		},
+	}
+
+	require.Same(t, flashPricing, svc.GetModelPricing("gemini-3-flash"))
+	require.Same(t, flashThinkingPricing, svc.GetModelPricing("gemini-2.5-flash-thinking"))
+	require.Same(t, proImagePricing, svc.GetModelPricing("gemini-3-pro-image"))
+}
+
+func TestGetModelPricing_Gemini31FlashImageUsesStaticFallback(t *testing.T) {
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{}}
+
+	got := svc.GetModelPricing("gemini-3.1-flash-image")
+	require.NotNil(t, got)
+	require.InDelta(t, 0.039, got.OutputCostPerImage, 1e-12)
+	require.Equal(t, "image_generation", got.Mode)
+}
+
+func TestGetModelPricing_GrokFamiliesUseStaticFallbacks(t *testing.T) {
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{}}
+
+	grok3 := svc.GetModelPricing("grok-3-beta")
+	require.NotNil(t, grok3)
+	require.InDelta(t, 3e-6, grok3.InputCostPerToken, 1e-12)
+
+	grok3Mini := svc.GetModelPricing("grok-3-mini-beta")
+	require.NotNil(t, grok3Mini)
+	require.InDelta(t, 3e-7, grok3Mini.InputCostPerToken, 1e-12)
+	require.InDelta(t, 5e-7, grok3Mini.OutputCostPerToken, 1e-12)
+
+	grok2 := svc.GetModelPricing("grok-2")
+	require.NotNil(t, grok2)
+	require.InDelta(t, 2e-6, grok2.InputCostPerToken, 1e-12)
+	require.Same(t, grok2, svc.GetModelPricing("grok-beta"))
+	require.Same(t, grok2, svc.GetModelPricing("grok-vision-beta"))
+
+	grok2Image := svc.GetModelPricing("grok-2-image")
+	require.NotNil(t, grok2Image)
+	require.InDelta(t, 0.07, grok2Image.OutputCostPerImage, 1e-12)
+}
+
 func TestGetModelPricing_ImageModelDoesNotFallbackToTextModel(t *testing.T) {
 	imagePricing := &LiteLLMModelPricing{InputCostPerToken: 3}
 	textPricing := &LiteLLMModelPricing{InputCostPerToken: 9}

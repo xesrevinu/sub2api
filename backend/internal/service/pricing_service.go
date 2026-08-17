@@ -102,6 +102,41 @@ var (
 		Mode:                    "chat",
 		SupportsPromptCaching:   true,
 	}
+	gemini31FlashImageFallbackPricing = &LiteLLMModelPricing{
+		OutputCostPerImage:    0.039,
+		LiteLLMProvider:       "vertex_ai-language-models",
+		Mode:                  "image_generation",
+		SupportsPromptCaching: true,
+	}
+	grok3FallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:       3e-06,
+		OutputCostPerToken:      1.5e-05,
+		CacheReadInputTokenCost: 7.5e-07,
+		LiteLLMProvider:         "xai",
+		Mode:                    "chat",
+		SupportsPromptCaching:   true,
+	}
+	grok3MiniFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:       3e-07,
+		OutputCostPerToken:      5e-07,
+		CacheReadInputTokenCost: 7.5e-08,
+		LiteLLMProvider:         "xai",
+		Mode:                    "chat",
+		SupportsPromptCaching:   true,
+	}
+	grok2FallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:       2e-06,
+		OutputCostPerToken:      1e-05,
+		CacheReadInputTokenCost: 5e-07,
+		LiteLLMProvider:         "xai",
+		Mode:                    "chat",
+		SupportsPromptCaching:   true,
+	}
+	grok2ImageFallbackPricing = &LiteLLMModelPricing{
+		OutputCostPerImage: 0.07,
+		LiteLLMProvider:    "xai",
+		Mode:               "image_generation",
+	}
 )
 
 // LiteLLMModelPricing LiteLLM价格数据结构
@@ -667,6 +702,23 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 		return s.matchOpenAIModel(lookupCandidates[0])
 	}
 
+	// 6. Google Gemini 图片模型静态兜底
+	if strings.HasPrefix(lookupCandidates[0], "gemini-3.1-flash-image") {
+		return gemini31FlashImageFallbackPricing
+	}
+
+	// 7. xAI Grok 家族静态兜底
+	switch {
+	case strings.HasPrefix(lookupCandidates[0], "grok-3-mini"):
+		return grok3MiniFallbackPricing
+	case strings.HasPrefix(lookupCandidates[0], "grok-3"):
+		return grok3FallbackPricing
+	case strings.HasPrefix(lookupCandidates[0], "grok-2-image"):
+		return grok2ImageFallbackPricing
+	case strings.HasPrefix(lookupCandidates[0], "grok-2"), strings.HasPrefix(lookupCandidates[0], "grok-vision-beta"), strings.HasPrefix(lookupCandidates[0], "grok-beta"):
+		return grok2FallbackPricing
+	}
+
 	return nil
 }
 
@@ -747,6 +799,7 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 		// Prefer canonical model names for all other aliases (including models/xxx).
 		candidates = append([]string{normalized}, candidates...)
 	}
+	candidates = append(candidates, pricingAliasCandidates(modelLower)...)
 
 	seen := make(map[string]struct{}, len(candidates))
 	out := make([]string, 0, len(candidates))
@@ -765,6 +818,50 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 		return []string{modelLower}
 	}
 	return out
+}
+
+func pricingAliasCandidates(model string) []string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return nil
+	}
+
+	switch {
+	case model == "chatgpt-4o-latest":
+		return []string{"gpt-4o"}
+	case model == "o1":
+		return []string{"o1-2024-12-17", "o1-preview"}
+	case strings.HasPrefix(model, "deepseek-v3"):
+		// DeepSeek's OpenAI-compatible aliases generally map to the non-reasoning chat SKU.
+		return []string{"deepseek-chat"}
+	case strings.HasPrefix(model, "deepseek-coder"):
+		return []string{"deepseek-chat"}
+	case strings.HasPrefix(model, "deepseek-r1"), strings.HasPrefix(model, "deepseek-reasoner"):
+		return []string{"deepseek-reasoner"}
+	case strings.HasPrefix(model, "gemini-2.5-flash-thinking"):
+		return []string{"gemini-2.5-flash"}
+	case strings.HasPrefix(model, "gemini-3-flash"):
+		return []string{"gemini-3-flash-preview"}
+	case strings.HasPrefix(model, "gemini-3-pro-image"):
+		return []string{"gemini-3-pro-image-preview"}
+	case strings.HasPrefix(model, "gemini-3.1-flash-image"):
+		return []string{"gemini-3.1-flash-image"}
+	case strings.HasPrefix(model, "grok-4.1"):
+		// "grok-4.1" is commonly exposed by compatible relays while xAI bills Grok 4 under grok-4/grok-4-0709.
+		return []string{"grok-4", "grok-4-0709"}
+	case strings.HasPrefix(model, "grok-4"):
+		return []string{"grok-4", "grok-4-0709"}
+	case strings.HasPrefix(model, "grok-3-mini"):
+		return []string{"grok-3-mini"}
+	case strings.HasPrefix(model, "grok-3"):
+		return []string{"grok-3"}
+	case strings.HasPrefix(model, "grok-2-image"):
+		return []string{"grok-2-image"}
+	case strings.HasPrefix(model, "grok-2"), strings.HasPrefix(model, "grok-vision-beta"), strings.HasPrefix(model, "grok-beta"):
+		return []string{"grok-2"}
+	}
+
+	return nil
 }
 
 func normalizeModelNameForPricing(model string) string {

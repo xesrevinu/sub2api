@@ -246,6 +246,157 @@ func TestGetModelPricing_OpenAIGPT54MiniFallback(t *testing.T) {
 	require.Zero(t, pricing.LongContextInputThreshold)
 }
 
+func TestGetModelPricing_OpenAIGPT54NanoFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("gpt-5.4-nano")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	require.InDelta(t, 2e-7, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 1.25e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 2e-8, pricing.CacheReadPricePerToken, 1e-12)
+	require.Zero(t, pricing.LongContextInputThreshold)
+}
+
+func TestGetModelPricing_DeepSeekV3Fallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("deepseek-v3")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	require.InDelta(t, 0.28e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 0.42e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 0.028e-6, pricing.CacheReadPricePerToken, 1e-12)
+}
+
+func TestGetModelPricing_DeepSeekAliasFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"deepseek-coder", "deepseek-v3-0324", "deepseek-r1-0528"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.NotNil(t, pricing, model)
+	}
+}
+
+func TestGetModelPricing_Grok41Fallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("grok-4.1")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	require.InDelta(t, 3e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 0.75e-6, pricing.CacheReadPricePerToken, 1e-12)
+}
+
+func TestGetModelPricing_GrokFamilyFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	grok3, err := svc.GetModelPricing("grok-3-beta")
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, grok3.InputPricePerToken, 1e-12)
+
+	grok3Mini, err := svc.GetModelPricing("grok-3-mini-beta")
+	require.NoError(t, err)
+	require.InDelta(t, 0.3e-6, grok3Mini.InputPricePerToken, 1e-12)
+	require.InDelta(t, 0.5e-6, grok3Mini.OutputPricePerToken, 1e-12)
+
+	grok2, err := svc.GetModelPricing("grok-2")
+	require.NoError(t, err)
+	require.InDelta(t, 2e-6, grok2.InputPricePerToken, 1e-12)
+	require.InDelta(t, 10e-6, grok2.OutputPricePerToken, 1e-12)
+
+	grokBeta, err := svc.GetModelPricing("grok-beta")
+	require.NoError(t, err)
+	require.InDelta(t, 2e-6, grokBeta.InputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricing_OpenAIAliasFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	o1, err := svc.GetModelPricing("o1")
+	require.NoError(t, err)
+	require.InDelta(t, 15e-6, o1.InputPricePerToken, 1e-12)
+	require.InDelta(t, 60e-6, o1.OutputPricePerToken, 1e-12)
+
+	gpt4o, err := svc.GetModelPricing("chatgpt-4o-latest")
+	require.NoError(t, err)
+	require.InDelta(t, 2.5e-6, gpt4o.InputPricePerToken, 1e-12)
+	require.InDelta(t, 10e-6, gpt4o.OutputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricing_QwenFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	qwenMax, err := svc.GetModelPricing("qwen-max-latest")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(2.4), qwenMax.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(9.6), qwenMax.OutputPricePerToken, 1e-12)
+
+	qwenPlus, err := svc.GetModelPricing("qwen-plus-2025-07-28")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.8), qwenPlus.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(2.0), qwenPlus.OutputPricePerToken, 1e-12)
+
+	qwenFlash, err := svc.GetModelPricing("qwen-flash-latest")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.15), qwenFlash.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(1.5), qwenFlash.OutputPricePerToken, 1e-12)
+
+	qwenTurbo, err := svc.GetModelPricing("qwen-turbo-2025-04-28")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.3), qwenTurbo.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.6), qwenTurbo.OutputPricePerToken, 1e-12)
+
+	qwenLong, err := svc.GetModelPricing("qwen-long-latest")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.5), qwenLong.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(2.0), qwenLong.OutputPricePerToken, 1e-12)
+
+	qwqPlus, err := svc.GetModelPricing("qwq-plus-latest")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(1.6), qwqPlus.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(4.0), qwqPlus.OutputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricing_GLMFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	glmPlus, err := svc.GetModelPricing("glm-4-plus")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(5.0), glmPlus.InputPricePerToken, 1e-12)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(5.0), glmPlus.OutputPricePerToken, 1e-12)
+
+	glmAir, err := svc.GetModelPricing("glm-4-air-250414")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.5), glmAir.InputPricePerToken, 1e-12)
+
+	glmAirX, err := svc.GetModelPricing("glm-4-airx")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(10.0), glmAirX.InputPricePerToken, 1e-12)
+
+	glmFlashX, err := svc.GetModelPricing("glm-4-flashx-250414")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(0.1), glmFlashX.InputPricePerToken, 1e-12)
+
+	glmLong, err := svc.GetModelPricing("glm-4-long")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(1.0), glmLong.InputPricePerToken, 1e-12)
+
+	glm4vPlus, err := svc.GetModelPricing("glm-4v-plus-0111")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(4.0), glm4vPlus.InputPricePerToken, 1e-12)
+
+	glmThinking, err := svc.GetModelPricing("glm-4.1v-thinking-flash")
+	require.NoError(t, err)
+	require.InDelta(t, yuanPerMillionToUSDPerToken(2.0), glmThinking.InputPricePerToken, 1e-12)
+
+	glmFlash, err := svc.GetModelPricing("glm-4-flash")
+	require.NoError(t, err)
+	require.Zero(t, glmFlash.InputPricePerToken)
+	require.Zero(t, glmFlash.OutputPricePerToken)
+}
 func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -452,6 +603,30 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "claude opus 4.5 alt separator", model: "claude-opus-4-5-20260101", expectedInput: 5e-6},
 		{name: "claude generic model fallback sonnet", model: "claude-foo-bar", expectedInput: 3e-6},
 		{name: "gemini explicit fallback", model: "gemini-3-1-pro", expectedInput: 2e-6},
+		{name: "deepseek v3 alias", model: "deepseek-v3", expectedInput: 0.28e-6},
+		{name: "deepseek coder alias", model: "deepseek-coder", expectedInput: 0.28e-6},
+		{name: "deepseek reasoner alias", model: "deepseek-r1", expectedInput: 0.28e-6},
+		{name: "grok 4.1 alias", model: "grok-4.1", expectedInput: 3e-6},
+		{name: "grok 3 alias", model: "grok-3-beta", expectedInput: 3e-6},
+		{name: "grok 3 mini alias", model: "grok-3-mini-beta", expectedInput: 0.3e-6},
+		{name: "grok 2 alias", model: "grok-2", expectedInput: 2e-6},
+		{name: "chatgpt 4o latest alias", model: "chatgpt-4o-latest", expectedInput: 2.5e-6},
+		{name: "openai o1 alias", model: "o1", expectedInput: 15e-6},
+		{name: "qwen max alias", model: "qwen-max-latest", expectedInput: yuanPerMillionToUSDPerToken(2.4)},
+		{name: "qwen plus alias", model: "qwen-plus-2025-07-28", expectedInput: yuanPerMillionToUSDPerToken(0.8)},
+		{name: "qwen flash alias", model: "qwen-flash-latest", expectedInput: yuanPerMillionToUSDPerToken(0.15)},
+		{name: "qwen turbo alias", model: "qwen-turbo-2025-04-28", expectedInput: yuanPerMillionToUSDPerToken(0.3)},
+		{name: "qwen long alias", model: "qwen-long-latest", expectedInput: yuanPerMillionToUSDPerToken(0.5)},
+		{name: "qwq plus alias", model: "qwq-plus-latest", expectedInput: yuanPerMillionToUSDPerToken(1.6)},
+		{name: "qwq 32b preview alias", model: "qwq-32b-preview", expectedInput: yuanPerMillionToUSDPerToken(2.0)},
+		{name: "glm 4 plus alias", model: "glm-4-plus", expectedInput: yuanPerMillionToUSDPerToken(5.0)},
+		{name: "glm 4 air alias", model: "glm-4-air-250414", expectedInput: yuanPerMillionToUSDPerToken(0.5)},
+		{name: "glm 4 airx alias", model: "glm-4-airx", expectedInput: yuanPerMillionToUSDPerToken(10.0)},
+		{name: "glm 4 flashx alias", model: "glm-4-flashx-250414", expectedInput: yuanPerMillionToUSDPerToken(0.1)},
+		{name: "glm 4 flash alias", model: "glm-4-flash", expectedInput: 0},
+		{name: "glm 4 long alias", model: "glm-4-long", expectedInput: yuanPerMillionToUSDPerToken(1.0)},
+		{name: "glm 4v plus alias", model: "glm-4v-plus-0111", expectedInput: yuanPerMillionToUSDPerToken(4.0)},
+		{name: "glm 4.1v thinking alias", model: "glm-4.1v-thinking-flash", expectedInput: yuanPerMillionToUSDPerToken(2.0)},
 		{name: "gemini unknown no fallback", model: "gemini-2.0-pro", expectNilPricing: true},
 		{name: "openai gpt5.4", model: "gpt-5.4", expectedInput: 2.5e-6},
 		{name: "openai gpt5.4 mini", model: "gpt-5.4-mini", expectedInput: 7.5e-7},
@@ -461,6 +636,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "openai legacy gpt5.1 codex falls back to gpt5.3 codex", model: "gpt-5.1-codex", expectedInput: 1.5e-6},
 		{name: "openai legacy codex mini latest falls back to gpt5.3 codex", model: "codex-mini-latest", expectedInput: 1.5e-6},
 		{name: "openai unknown no fallback", model: "gpt-unknown-model", expectNilPricing: true},
+		{name: "non supported family", model: "moonshot-v1-8k", expectNilPricing: true},
 		{
 			name:              "deepseek v4 pro",
 			model:             "deepseek-v4-pro",
@@ -475,21 +651,6 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedOutput:    floatPtr(2.8e-7),
 			expectedCacheRead: floatPtr(2.8e-9),
 		},
-		{
-			name:              "deepseek chat alias → flash",
-			model:             "deepseek-chat",
-			expectedInput:     1.4e-7,
-			expectedOutput:    floatPtr(2.8e-7),
-			expectedCacheRead: floatPtr(2.8e-9),
-		},
-		{
-			name:              "deepseek reasoner alias → flash",
-			model:             "deepseek-reasoner",
-			expectedInput:     1.4e-7,
-			expectedOutput:    floatPtr(2.8e-7),
-			expectedCacheRead: floatPtr(2.8e-9),
-		},
-
 		// ---- 智谱 GLM（z.ai USD 口径）----
 		{
 			name:              "glm 5.2 flagship",
@@ -749,7 +910,6 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		},
 
 		// ---- 负向用例 ----
-		{name: "qwen unknown no fallback", model: "qwen-max", expectNilPricing: true},
 		// doubao-pro / doubao-embedding（纯文本）不在白名单，不回退；仅 doubao-embedding-vision 显式命中。
 		{name: "doubao unknown no fallback", model: "doubao-pro", expectNilPricing: true},
 		{name: "doubao text embedding no fallback", model: "doubao-embedding-text-240515", expectNilPricing: true},

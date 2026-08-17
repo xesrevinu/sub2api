@@ -116,10 +116,15 @@ const (
 	openAIGPT54LongContextInputThreshold   = 272000
 	openAIGPT54LongContextInputMultiplier  = 2.0
 	openAIGPT54LongContextOutputMultiplier = 1.5
+	cnyToUSDFallbackExchangeRate           = 0.145
 )
 
 func normalizeBillingServiceTier(serviceTier string) string {
 	return strings.ToLower(strings.TrimSpace(serviceTier))
+}
+
+func yuanPerMillionToUSDPerToken(pricePerMillion float64) float64 {
+	return (pricePerMillion * cnyToUSDFallbackExchangeRate) / 1_000_000
 }
 
 func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bool {
@@ -295,6 +300,68 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     false,
 	}
 
+	// DeepSeek V3 / DeepSeek Chat
+	s.fallbackPrices["deepseek-chat"] = &ModelPricing{
+		InputPricePerToken:     0.28e-6,  // $0.28 per MTok
+		OutputPricePerToken:    0.42e-6,  // $0.42 per MTok
+		CacheReadPricePerToken: 0.028e-6, // $0.028 per MTok
+		SupportsCacheBreakdown: false,
+	}
+
+	// DeepSeek R1 / DeepSeek Reasoner
+	s.fallbackPrices["deepseek-reasoner"] = s.fallbackPrices["deepseek-chat"]
+	s.fallbackPrices["deepseek-coder"] = s.fallbackPrices["deepseek-chat"]
+
+	// xAI Grok 4 family
+	s.fallbackPrices["grok-4"] = &ModelPricing{
+		InputPricePerToken:     3e-6,    // $3 per MTok
+		OutputPricePerToken:    15e-6,   // $15 per MTok
+		CacheReadPricePerToken: 0.75e-6, // $0.75 per MTok
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["grok-3"] = s.fallbackPrices["grok-4"]
+	s.fallbackPrices["grok-3-mini"] = &ModelPricing{
+		InputPricePerToken:     0.3e-6, // $0.30 per MTok
+		OutputPricePerToken:    0.5e-6, // $0.50 per MTok
+		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["grok-2"] = &ModelPricing{
+		InputPricePerToken:     2e-6,   // $2 per MTok
+		OutputPricePerToken:    10e-6,  // $10 per MTok
+		CacheReadPricePerToken: 0.5e-6, // $0.50 per MTok
+		SupportsCacheBreakdown: false,
+	}
+
+	// OpenAI GPT-4o / o1 aliases
+	s.fallbackPrices["gpt-4o"] = &ModelPricing{
+		InputPricePerToken:             2.5e-6,
+		InputPricePerTokenPriority:     4.25e-6,
+		OutputPricePerToken:            10e-6,
+		OutputPricePerTokenPriority:    17e-6,
+		CacheReadPricePerToken:         1.25e-6,
+		CacheReadPricePerTokenPriority: 2.125e-6,
+		SupportsCacheBreakdown:         false,
+	}
+	s.fallbackPrices["o1"] = &ModelPricing{
+		InputPricePerToken:     15e-6,
+		OutputPricePerToken:    60e-6,
+		CacheReadPricePerToken: 7.5e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// OpenAI GPT-5.1（本地兜底，防止动态定价时不可用时拒绝计费）
+	s.fallbackPrices["gpt-5.1"] = &ModelPricing{
+		InputPricePerToken:             1.25e-6, // $1.25 per MTok
+		InputPricePerTokenPriority:     2.5e-6,  // $2.5 per MTok
+		OutputPricePerToken:            10e-6,   // $10 per MTok
+		OutputPricePerTokenPriority:    20e-6,   // $20 per MTok
+		CacheCreationPricePerToken:     1.25e-6, // $1.25 per MTok
+		CacheReadPricePerToken:         0.125e-6,
+		CacheReadPricePerTokenPriority: 0.25e-6,
+		SupportsCacheBreakdown:         false,
+	}
+
 	// Gemini 3.6 Flash (Google AI pricing: $1.50 input / $7.50 output /
 	// $0.15 cached input per MTok). Antigravity's -high/-low/-medium/-tiered
 	// aliases are matched below so unavailable remote pricing never records
@@ -305,7 +372,6 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken: 0.15e-6,
 		SupportsCacheBreakdown: false,
 	}
-
 	// OpenAI GPT-5.4（业务指定价格）
 	s.fallbackPrices["gpt-5.4"] = &ModelPricing{
 		InputPricePerToken:             2.5e-6,  // $2.5 per MTok
@@ -398,6 +464,108 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken:         0.15e-6,
 		CacheReadPricePerTokenPriority: 0.3e-6,
 		SupportsCacheBreakdown:         false,
+	}
+	s.fallbackPrices["gpt-5.2-codex"] = &ModelPricing{
+		InputPricePerToken:             1.75e-6,
+		InputPricePerTokenPriority:     3.5e-6,
+		OutputPricePerToken:            14e-6,
+		OutputPricePerTokenPriority:    28e-6,
+		CacheCreationPricePerToken:     1.75e-6,
+		CacheReadPricePerToken:         0.175e-6,
+		CacheReadPricePerTokenPriority: 0.35e-6,
+		SupportsCacheBreakdown:         false,
+	}
+	s.fallbackPrices["gpt-5.1-codex"] = s.fallbackPrices["gpt-5.3-codex"]
+
+	// Alibaba Qwen / QwQ.
+	// These vendors publish prices in CNY per million tokens; convert to USD/token so
+	// fallback billing still works when the dynamic pricing feed does not include them.
+	s.fallbackPrices["qwen-max"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(2.4),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(9.6),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen-plus"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.8),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(2.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3.5-plus"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.8),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(4.8),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen-flash"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.15),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(1.5),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3.5-flash"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.2),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(2.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen-turbo"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.3),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(0.6),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen-long"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.5),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(2.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwq-plus"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(1.6),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(4.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwq-32b-preview"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(2.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(6.0),
+		SupportsCacheBreakdown: false,
+	}
+
+	// Zhipu GLM.
+	s.fallbackPrices["glm-4-plus"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(5.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(5.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4-air"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.5),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(0.5),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4-airx"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(10.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(10.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4-flashx"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(0.1),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(0.1),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4-flash"] = &ModelPricing{
+		InputPricePerToken:     0,
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4-long"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(1.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(1.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4v-plus"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(4.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(4.0),
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["glm-4.1v-thinking"] = &ModelPricing{
+		InputPricePerToken:     yuanPerMillionToUSDPerToken(2.0),
+		OutputPricePerToken:    yuanPerMillionToUSDPerToken(2.0),
+		SupportsCacheBreakdown: false,
 	}
 
 	// ============================================================
@@ -703,6 +871,81 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "gemini-3.1-pro") || strings.Contains(modelLower, "gemini-3-1-pro") {
 		return s.fallbackPrices["gemini-3.1-pro"]
+	}
+	if strings.HasPrefix(modelLower, "deepseek-v3") || strings.HasPrefix(modelLower, "deepseek-chat") || strings.HasPrefix(modelLower, "deepseek-coder") {
+		return s.fallbackPrices["deepseek-chat"]
+	}
+	if strings.HasPrefix(modelLower, "deepseek-r1") || strings.HasPrefix(modelLower, "deepseek-reasoner") {
+		return s.fallbackPrices["deepseek-reasoner"]
+	}
+	// Upstream owns exact Grok 4.x pricing (grok-4.5/4.6/4.3 and unknown family
+	// fallback). Do not re-add a broad grok-4 prefix here; it would shadow the
+	// official 200k long-context card and break upstream usage billing tests.
+	if strings.HasPrefix(modelLower, "grok-3-mini") {
+		return s.fallbackPrices["grok-3-mini"]
+	}
+	if strings.HasPrefix(modelLower, "grok-3") {
+		return s.fallbackPrices["grok-3"]
+	}
+	if strings.HasPrefix(modelLower, "grok-2") || strings.HasPrefix(modelLower, "grok-beta") || strings.HasPrefix(modelLower, "grok-vision-beta") {
+		return s.fallbackPrices["grok-2"]
+	}
+	if modelLower == "chatgpt-4o-latest" || modelLower == "gpt-4o" {
+		return s.fallbackPrices["gpt-4o"]
+	}
+	if modelLower == "o1" || strings.HasPrefix(modelLower, "o1-preview") || strings.HasPrefix(modelLower, "o1-2024-12-17") {
+		return s.fallbackPrices["o1"]
+	}
+	if strings.HasPrefix(modelLower, "qwen-max") {
+		return s.fallbackPrices["qwen-max"]
+	}
+	if strings.HasPrefix(modelLower, "qwen-plus") {
+		return s.fallbackPrices["qwen-plus"]
+	}
+	if strings.HasPrefix(modelLower, "qwen3.5-plus") {
+		return s.fallbackPrices["qwen3.5-plus"]
+	}
+	if strings.HasPrefix(modelLower, "qwen-flash") {
+		return s.fallbackPrices["qwen-flash"]
+	}
+	if strings.HasPrefix(modelLower, "qwen3.5-flash") {
+		return s.fallbackPrices["qwen3.5-flash"]
+	}
+	if strings.HasPrefix(modelLower, "qwen-turbo") {
+		return s.fallbackPrices["qwen-turbo"]
+	}
+	if strings.HasPrefix(modelLower, "qwen-long") {
+		return s.fallbackPrices["qwen-long"]
+	}
+	if strings.HasPrefix(modelLower, "qwq-plus") {
+		return s.fallbackPrices["qwq-plus"]
+	}
+	if strings.HasPrefix(modelLower, "qwq-32b-preview") {
+		return s.fallbackPrices["qwq-32b-preview"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-plus") {
+		return s.fallbackPrices["glm-4-plus"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-airx") {
+		return s.fallbackPrices["glm-4-airx"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-air") {
+		return s.fallbackPrices["glm-4-air"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-flashx") {
+		return s.fallbackPrices["glm-4-flashx"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-flash") {
+		return s.fallbackPrices["glm-4-flash"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4-long") {
+		return s.fallbackPrices["glm-4-long"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4v-plus") {
+		return s.fallbackPrices["glm-4v-plus"]
+	}
+	if strings.HasPrefix(modelLower, "glm-4.1v-thinking") {
+		return s.fallbackPrices["glm-4.1v-thinking"]
 	}
 	if strings.Contains(modelLower, "gemini-3.6-flash") || strings.Contains(modelLower, "gemini-3-6-flash") {
 		return s.fallbackPrices["gemini-3.6-flash"]
