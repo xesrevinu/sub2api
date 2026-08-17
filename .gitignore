@@ -135,6 +135,7 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/UPGRADE_LOCAL_FORK_CN.md
 !docs/ASYNC_IMAGE_TASKS.md
 !docs/legal/
 !docs/legal/*.md
@@ -143,6 +144,8 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+.codemogger
+.direnv/
 
 # Vitest / Vite cache at repo root
 .vite/
