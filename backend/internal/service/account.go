@@ -1549,6 +1549,23 @@ func (a *Account) GetGrokAccessToken() string {
 	return a.GetCredential("access_token")
 }
 
+func (a *Account) GetGrokEmail() string {
+	if a == nil || !a.IsGrok() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("email"))
+}
+
+func (a *Account) GetGrokUserID() string {
+	if a == nil || !a.IsGrok() {
+		return ""
+	}
+	if v := strings.TrimSpace(a.GetCredential("sub")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.GetExtraString("sub"))
+}
+
 func (a *Account) GetGrokRefreshToken() string {
 	if !a.IsGrokOAuth() {
 		return ""

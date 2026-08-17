@@ -613,7 +613,7 @@ func TestBuildGrokResponsesRequestUsesAccountBaseURLAndBearerToken(t *testing.T)
 	require.Equal(t, "https://xai.test/v1/responses", req.URL.String())
 	require.Equal(t, "Bearer access-token", req.Header.Get("Authorization"))
 	require.Equal(t, "application/json", req.Header.Get("Content-Type"))
-	require.Contains(t, req.Header.Get("Accept"), "text/event-stream")
+	require.Equal(t, "application/json", req.Header.Get("Accept"))
 	require.Equal(t, grokCLIVersion, req.Header.Get("X-Grok-Client-Version"))
 	require.Equal(t, "isolated-cache-id", req.Header.Get(grokConversationIDHeader))
 

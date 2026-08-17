@@ -153,6 +153,13 @@ func isGrokRequestContext(c *gin.Context) bool {
 // native tools with tool_choice=none: this selects the cache-capable tier
 // without allowing an actual search. Explicit client function tools are handled by
 // applyGrokFreeMessagesFunctionToolCacheRoute (Messages bridge and native Responses).
+// grokFreeCacheInjectionEnabled reports whether this OAuth account should get
+// the Free-tier native cache tools. Paid Grok OAuth routes reject the injected
+// tools + tool_choice="none" combination, so only known Free accounts opt in.
+func grokFreeCacheInjectionEnabled(account *Account) bool {
+	return isKnownGrokFreeAccount(account)
+}
+
 func applyGrokResponsesCacheIdentity(body, intentSourceBody []byte, identity string, injectFreeTierTools bool) ([]byte, error) {
 	identity = strings.TrimSpace(identity)
 	if identity == "" {

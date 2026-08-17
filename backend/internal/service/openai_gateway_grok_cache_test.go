@@ -368,6 +368,19 @@ func TestApplyGrokCacheIdentityWritesResponsesBodyAndHeader(t *testing.T) {
 	require.False(t, gjson.GetBytes(unscopedBody, "tool_choice").Exists())
 }
 
+func TestGrokFreeCacheInjectionEnabledOnlyForKnownFree(t *testing.T) {
+	paid := healthyGrokOAuthGatewayTestAccount(9101, "access-token")
+	paid.Credentials["subscription_tier"] = "supergrok_heavy"
+	require.False(t, grokFreeCacheInjectionEnabled(paid))
+
+	free := healthyGrokOAuthGatewayTestAccount(9102, "access-token")
+	free.Credentials["subscription_tier"] = "free"
+	require.True(t, grokFreeCacheInjectionEnabled(free))
+
+	apiKey := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey}
+	require.False(t, grokFreeCacheInjectionEnabled(apiKey))
+}
+
 func TestGrokFreeMessagesClientToolCacheDefaultsOnForKnownFree(t *testing.T) {
 	account := healthyGrokOAuthGatewayTestAccount(901, "access-token")
 	account.Credentials["subscription_tier"] = " FREE "

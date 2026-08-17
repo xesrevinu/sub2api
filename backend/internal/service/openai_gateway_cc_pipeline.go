@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -208,7 +209,8 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
-			applyGrokCLIHeaders(upstreamReq.Header)
+			model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+			applyGrokOAuthInferenceHeaders(upstreamReq.Header, account, model, grokCacheIdentity)
 		}
 		applyGrokCacheHeaders(upstreamReq.Header, grokCacheIdentity)
 	}

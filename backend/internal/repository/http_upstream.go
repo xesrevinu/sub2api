@@ -197,6 +197,9 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
 func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	applyGrokCLIProxyHeaders(req)
+	if isGrokBuildTLSHost(req) {
+		return s.DoWithTLS(req, proxyURL, accountID, accountConcurrency, tlsfingerprint.GrokBuildProfile())
+	}
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
 	}
@@ -242,6 +245,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 // profile 为 nil 时不启用 TLS 指纹，行为与 Do 方法相同。
 // profile 非 nil 时使用指定的 Profile 进行 TLS 指纹伪装。
 func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	if isGrokBuildTLSHost(req) {
+		profile = tlsfingerprint.GrokBuildProfile()
+	}
 	if profile == nil {
 		return s.Do(req, proxyURL, accountID, accountConcurrency)
 	}
@@ -404,9 +410,19 @@ func newGrokOfficialAPIFallbackRequest(req *http.Request) (*http.Request, error)
 	for _, header := range []string{
 		"X-XAI-Token-Auth",
 		"X-Grok-Client-Version",
+		"X-Grok-Client-Identifier",
+		"X-Grok-Client-Mode",
 		"X-Grok-Client-Surface",
+		"X-Authenticateresponse",
 		"X-UserID",
 		"X-Email",
+		"X-Grok-User-Id",
+		"X-Grok-Model-Override",
+		"X-Grok-Req-Id",
+		"X-Grok-Session-Id",
+		"X-Grok-Agent-Id",
+		"X-Grok-Turn-Idx",
+		"X-Grok-Doom-Loop-Check",
 		"User-Agent",
 	} {
 		fallbackReq.Header.Del(header)
@@ -446,6 +462,16 @@ type prefixedReadCloser struct {
 	io.Closer
 }
 
+// isGrokBuildTLSHost reports whether the request should use the rustls 0.23
+// Grok Build TLS/HTTP2 fingerprint instead of Go's default stack.
+func isGrokBuildTLSHost(req *http.Request) bool {
+	if req == nil || req.URL == nil || !strings.EqualFold(strings.TrimSpace(req.URL.Scheme), "https") {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
+	return host == grokCLIProxyHost || host == grokOfficialAPIHost || strings.HasSuffix(host, ".api.x.ai")
+}
+
 // applyGrokCLIProxyHeaders applies the official Grok Build client identity at
 // the final shared transport boundary. Keying this behavior to the exact CLI
 // proxy host keeps direct api.x.ai traffic unchanged and automatically covers
@@ -466,10 +492,7 @@ func applyGrokCLIProxyHeaders(req *http.Request) {
 	if !isSupportedGrokCLIVersion(version) {
 		version = grokCLIStableVersion
 	}
-	req.Header.Set("X-XAI-Token-Auth", xai.CLITokenAuth)
-	req.Header.Set("x-grok-client-version", version)
-	req.Header.Set("x-grok-client-identifier", xai.CLIClientIdentifier)
-	req.Header.Set("User-Agent", xai.CLIUserAgent(version))
+	xai.ApplyCLIIdentityHeaders(req.Header, version)
 }
 
 func isSupportedGrokCLIVersion(version string) bool {
@@ -478,6 +501,13 @@ func isSupportedGrokCLIVersion(version string) bool {
 	return semver.IsValid(canonical) &&
 		semver.Canonical(canonical) == canonical &&
 		semver.Compare(canonical, minimum) >= 0
+}
+
+func tlsFingerprintCacheKey(profile *tlsfingerprint.Profile) string {
+	if profile != nil && profile.Name == tlsfingerprint.GrokBuildProfileName {
+		return "tls:grok-build"
+	}
+	return "tls"
 }
 
 // acquireClientWithTLS 获取或创建带 TLS 指纹的客户端
@@ -495,9 +525,10 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, upstreamProfile)
-	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
-	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls"
+	tlsKey := tlsFingerprintCacheKey(profile)
+	// TLS 指纹客户端使用独立的缓存键，与普通客户端隔离；Grok rustls/h2 再单独成池。
+	cacheKey := tlsKey + ":" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
+	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":" + tlsKey
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -546,9 +577,15 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 		}
 	}
 
-	// 创建带 TLS 指纹的 Transport
+	// 创建带 TLS 指纹的 Transport。Grok Build profile 直接使用 http2.Transport；
+	// 普通指纹 profile 继续使用 http.Transport（Go 只在 *tls.Conn 上识别 ALPN）。
 	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
-	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
+	var transport http.RoundTripper
+	if tlsfingerprint.WantsHTTP2(profile) {
+		transport, err = buildGrokHTTP2Transport(settings, parsedProxy, profile)
+	} else {
+		transport, err = buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
+	}
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
@@ -1365,7 +1402,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 		MaxConnsPerHost:       settings.maxConnsPerHost,
 		IdleConnTimeout:       settings.idleConnTimeout,
 		ResponseHeaderTimeout: settings.responseHeaderTimeout,
-		// 禁用默认的 TLS，我们使用自定义的 DialTLSContext
+		// 默认关闭 HTTP/2；Grok rustls profile 在 DialTLS 配好后再打开。
 		ForceAttemptHTTP2: false,
 	}
 
@@ -1402,6 +1439,49 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 	}
 
 	return transport, nil
+}
+
+// buildGrokHTTP2Transport returns an HTTP/2 round tripper that performs the
+// rustls 0.23 TLS handshake through tlsfingerprint. Go's net/http cannot
+// recognize ALPN on utls.UConn (it only inspects *tls.Conn), so Grok traffic
+// must use http2.Transport directly.
+func buildGrokHTTP2Transport(settings poolSettings, proxyURL *url.URL, profile *tlsfingerprint.Profile) (http.RoundTripper, error) {
+	h2 := &http2.Transport{
+		IdleConnTimeout: settings.idleConnTimeout,
+		// Match official Grok Build reqwest keepalive: interval 20s, timeout 10s.
+		ReadIdleTimeout: 20 * time.Second,
+		PingTimeout:     10 * time.Second,
+	}
+
+	if proxyURL == nil {
+		dialer := tlsfingerprint.NewDialer(profile, nil)
+		h2.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return dialer.DialTLSContext(ctx, network, addr)
+		}
+		return h2, nil
+	}
+
+	switch strings.ToLower(proxyURL.Scheme) {
+	case "socks5", "socks5h":
+		socksDialer := tlsfingerprint.NewSOCKS5ProxyDialer(profile, proxyURL)
+		h2.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return socksDialer.DialTLSContext(ctx, network, addr)
+		}
+	case "http":
+		httpDialer := tlsfingerprint.NewHTTPProxyDialer(profile, proxyURL)
+		h2.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return httpDialer.DialTLSContext(ctx, network, addr)
+		}
+	case "https":
+		// The fingerprint dialer cannot TLS-encrypt its CONNECT preface to an
+		// HTTPS proxy; keep the existing no-fingerprint fallback.
+		return buildUpstreamTransport(settings, proxyURL, upstreamProtocolModeDefault)
+	default:
+		slog.Debug("tls_fingerprint_transport_unknown_scheme_fallback", "scheme", proxyURL.Scheme)
+		return buildUpstreamTransport(settings, proxyURL, upstreamProtocolModeDefault)
+	}
+
+	return h2, nil
 }
 
 // trackedBody 带跟踪功能的响应体包装器

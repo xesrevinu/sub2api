@@ -665,7 +665,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	upstreamReq.Header.Set("Authorization", "Bearer "+token)
 	upstreamReq.Header.Set("Accept", "application/json")
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(targetURL) {
-		applyGrokCLIHeaders(upstreamReq.Header)
+		applyGrokOAuthInferenceHeaders(upstreamReq.Header, account, upstreamModel, "")
 	}
 	if endpoint.RequiresRequestBody() {
 		contentType = strings.TrimSpace(contentType)
@@ -776,6 +776,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	statusReq.Header.Set("Accept", "application/json")
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(statusURL) {
 		applyGrokCLIHeaders(statusReq.Header)
+		applyGrokCLIAccountHeaders(statusReq.Header, account)
 	}
 	account.ApplyHeaderOverrides(statusReq.Header)
 
@@ -839,6 +840,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		contentReq.Header.Set("Authorization", "Bearer "+token)
 		if account.IsGrokOAuth() && isGrokCLIProxyTarget(contentURL) {
 			applyGrokCLIHeaders(contentReq.Header)
+			applyGrokCLIAccountHeaders(contentReq.Header, account)
 		}
 		account.ApplyHeaderOverrides(contentReq.Header)
 	}

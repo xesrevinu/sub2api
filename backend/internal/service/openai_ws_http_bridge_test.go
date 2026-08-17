@@ -754,7 +754,8 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		Concurrency: 1,
 		Status:      StatusActive,
 		Credentials: map[string]any{
-			"base_url": xai.DefaultCLIBaseURL,
+			"base_url":          xai.DefaultCLIBaseURL,
+			"subscription_tier": "free",
 		},
 	}
 

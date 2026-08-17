@@ -951,6 +951,7 @@ func (s *AccountTestService) applyGrokTestRequestHeaders(req *http.Request, acco
 	// are stamped on the official API host (e.g. ZDR upload_url false positives).
 	if account.IsGrokOAuth() && req.URL != nil && isGrokCLIProxyTarget(req.URL.String()) {
 		applyGrokCLIHeaders(req.Header)
+		applyGrokCLIAccountHeaders(req.Header, account)
 	}
 	account.ApplyHeaderOverrides(req.Header)
 }
@@ -1587,7 +1588,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+authToken)
 	if account.IsGrokOAuth() {
-		applyGrokCLIHeaders(req.Header)
+		applyGrokOAuthInferenceHeaders(req.Header, account, "grok-stt", "")
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
@@ -1660,7 +1661,7 @@ func (s *AccountTestService) testGrokRealtime(c *gin.Context, ctx context.Contex
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+authToken)
 	if account.IsGrokOAuth() {
-		applyGrokCLIHeaders(headers)
+		applyGrokOAuthInferenceHeaders(headers, account, model, "")
 	}
 	account.ApplyHeaderOverrides(headers)
 

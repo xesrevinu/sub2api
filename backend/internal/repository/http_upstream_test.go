@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/net/http2"
 )
 
 func TestHTTPUpstreamDoCanDisableRedirectsPerRequest(t *testing.T) {
@@ -188,6 +189,17 @@ func serveTestSOCKS5Conn(client net.Conn) {
 	_, _ = io.Copy(client, target)
 }
 
+func grokBuildTLSClientKeys(svc *httpUpstreamService, accountID int64, accountConcurrency int) (cacheKey, poolKey, proxyKey string) {
+	isolation := svc.getIsolationMode()
+	proxyKey = directProxyKey
+	settings := svc.resolvePoolSettings(isolation, accountConcurrency)
+	settings = svc.applyProfilePoolSettings(settings, service.HTTPUpstreamProfileDefault)
+	tlsKey := tlsFingerprintCacheKey(tlsfingerprint.GrokBuildProfile())
+	cacheKey = tlsKey + ":" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
+	poolKey = buildPoolKey(settings, upstreamProtocolModeDefault) + ":" + tlsKey
+	return cacheKey, poolKey, proxyKey
+}
+
 func TestHTTPUpstreamDoAppliesGrokCLIIdentityBeforeOAuthRoundTrip(t *testing.T) {
 	t.Setenv("XAI_GROK_CLI_VERSION", "")
 
@@ -198,13 +210,7 @@ func TestHTTPUpstreamDoAppliesGrokCLIIdentityBeforeOAuthRoundTrip(t *testing.T) 
 			require.True(t, ok)
 
 			const accountID int64 = 4084
-			isolation := svc.getIsolationMode()
-			profile := service.HTTPUpstreamProfileDefault
-			proxyKey := directProxyKey
-			protocolMode := svc.resolveProtocolMode(profile, proxyKey, nil)
-			settings := svc.resolvePoolSettings(isolation, 1)
-			settings = svc.applyProfilePoolSettings(settings, profile)
-			cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
+			cacheKey, poolKey, proxyKey := grokBuildTLSClientKeys(svc, accountID, 1)
 
 			var capturedHeaders http.Header
 			svc.clients[cacheKey] = &upstreamClientEntry{
@@ -221,9 +227,8 @@ func TestHTTPUpstreamDoAppliesGrokCLIIdentityBeforeOAuthRoundTrip(t *testing.T) 
 						Request:    req,
 					}, nil
 				})},
-				proxyKey:     proxyKey,
-				poolKey:      buildPoolKey(settings, protocolMode),
-				protocolMode: protocolMode,
+				proxyKey: proxyKey,
+				poolKey:  poolKey,
 			}
 
 			req, err := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/"+endpoint, nil)
@@ -235,9 +240,12 @@ func TestHTTPUpstreamDoAppliesGrokCLIIdentityBeforeOAuthRoundTrip(t *testing.T) 
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 			require.NoError(t, resp.Body.Close())
 
-			require.Equal(t, "0.2.114", capturedHeaders.Get("x-grok-client-version"))
+			require.Equal(t, "1.0.3", capturedHeaders.Get("x-grok-client-version"))
 			require.Equal(t, "xai-grok-cli", capturedHeaders.Get("X-XAI-Token-Auth"))
-			require.Equal(t, "xai-grok-workspace/0.2.114", capturedHeaders.Get("User-Agent"))
+			require.Equal(t, "grok-pager", capturedHeaders.Get("x-grok-client-identifier"))
+			require.Equal(t, "interactive", capturedHeaders.Get("x-grok-client-mode"))
+			require.Equal(t, "authenticate-response", capturedHeaders.Get("x-authenticateresponse"))
+			require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", capturedHeaders.Get("User-Agent"))
 		})
 	}
 }
@@ -248,13 +256,7 @@ func TestHTTPUpstreamDoFallsBackToOfficialGrokAPIOnCLIAccessDenied(t *testing.T)
 	require.True(t, ok)
 
 	const accountID int64 = 4421
-	isolation := svc.getIsolationMode()
-	profile := service.HTTPUpstreamProfileDefault
-	proxyKey := directProxyKey
-	protocolMode := svc.resolveProtocolMode(profile, proxyKey, nil)
-	settings := svc.resolvePoolSettings(isolation, 1)
-	settings = svc.applyProfilePoolSettings(settings, profile)
-	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
+	cacheKey, poolKey, proxyKey := grokBuildTLSClientKeys(svc, accountID, 1)
 
 	payload := []byte(`{"model":"grok-4.5","input":"hello"}`)
 	var calls int
@@ -287,9 +289,8 @@ func TestHTTPUpstreamDoFallsBackToOfficialGrokAPIOnCLIAccessDenied(t *testing.T)
 				Request:    req,
 			}, nil
 		})},
-		proxyKey:     proxyKey,
-		poolKey:      buildPoolKey(settings, protocolMode),
-		protocolMode: protocolMode,
+		proxyKey: proxyKey,
+		poolKey:  poolKey,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", bytes.NewReader(payload))
@@ -458,20 +459,21 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 
 		applyGrokCLIProxyHeaders(req)
 
-		require.Equal(t, "0.2.114", req.Header.Get("x-grok-client-version"))
+		require.Equal(t, "1.0.3", req.Header.Get("x-grok-client-version"))
 		require.Equal(t, "xai-grok-cli", req.Header.Get("X-XAI-Token-Auth"))
-		require.Equal(t, "xai-grok-workspace/0.2.114", req.Header.Get("User-Agent"))
+		require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", req.Header.Get("User-Agent"))
+		require.Equal(t, "authenticate-response", req.Header.Get("x-authenticateresponse"))
 	})
 
 	t.Run("accepts a valid operator override", func(t *testing.T) {
-		t.Setenv("XAI_GROK_CLI_VERSION", "0.2.115-alpha.1")
+		t.Setenv("XAI_GROK_CLI_VERSION", "1.0.4")
 		req, err := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/chat/completions", nil)
 		require.NoError(t, err)
 
 		applyGrokCLIProxyHeaders(req)
 
-		require.Equal(t, "0.2.115-alpha.1", req.Header.Get("x-grok-client-version"))
-		require.Equal(t, "xai-grok-workspace/0.2.115-alpha.1", req.Header.Get("User-Agent"))
+		require.Equal(t, "1.0.4", req.Header.Get("x-grok-client-version"))
+		require.Equal(t, "grok-pager/1.0.4 grok-shell/1.0.4 (macos; aarch64)", req.Header.Get("User-Agent"))
 	})
 
 	t.Run("rejects an unsafe override", func(t *testing.T) {
@@ -481,30 +483,30 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 
 		applyGrokCLIProxyHeaders(req)
 
-		require.Equal(t, "0.2.114", req.Header.Get("x-grok-client-version"))
+		require.Equal(t, "1.0.3", req.Header.Get("x-grok-client-version"))
 		require.Empty(t, req.Header.Get("X-Injected"))
 	})
 
 	t.Run("rejects an override below the supported minimum", func(t *testing.T) {
-		t.Setenv("XAI_GROK_CLI_VERSION", "0.2.113")
+		t.Setenv("XAI_GROK_CLI_VERSION", "1.0.2")
 		req, err := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", nil)
 		require.NoError(t, err)
 
 		applyGrokCLIProxyHeaders(req)
 
-		require.Equal(t, "0.2.114", req.Header.Get("x-grok-client-version"))
-		require.Equal(t, "xai-grok-workspace/0.2.114", req.Header.Get("User-Agent"))
+		require.Equal(t, "1.0.3", req.Header.Get("x-grok-client-version"))
+		require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", req.Header.Get("User-Agent"))
 	})
 
 	t.Run("rejects a prerelease override at the minimum version", func(t *testing.T) {
-		t.Setenv("XAI_GROK_CLI_VERSION", "0.2.114-beta.1")
+		t.Setenv("XAI_GROK_CLI_VERSION", "1.0.3-beta.1")
 		req, err := http.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", nil)
 		require.NoError(t, err)
 
 		applyGrokCLIProxyHeaders(req)
 
-		require.Equal(t, "0.2.114", req.Header.Get("x-grok-client-version"))
-		require.Equal(t, "xai-grok-workspace/0.2.114", req.Header.Get("User-Agent"))
+		require.Equal(t, "1.0.3", req.Header.Get("x-grok-client-version"))
+		require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", req.Header.Get("User-Agent"))
 	})
 
 	// Every entry sits above the pinned minimum, so a rejection here can only be
@@ -523,8 +525,8 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 
 			applyGrokCLIProxyHeaders(req)
 
-			require.Equal(t, "0.2.114", req.Header.Get("x-grok-client-version"))
-			require.Equal(t, "xai-grok-workspace/0.2.114", req.Header.Get("User-Agent"))
+			require.Equal(t, "1.0.3", req.Header.Get("x-grok-client-version"))
+			require.Equal(t, "grok-pager/1.0.3 grok-shell/1.0.3 (macos; aarch64)", req.Header.Get("User-Agent"))
 		})
 	}
 
@@ -540,6 +542,46 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 		require.Empty(t, req.Header.Get("X-XAI-Token-Auth"))
 		require.Equal(t, "sub2api-grok/1.0", req.Header.Get("User-Agent"))
 	})
+}
+
+func TestIsGrokBuildTLSHost(t *testing.T) {
+	mustReq := func(rawURL string) *http.Request {
+		req, err := http.NewRequest(http.MethodPost, rawURL, nil)
+		require.NoError(t, err)
+		return req
+	}
+	require.True(t, isGrokBuildTLSHost(mustReq("https://cli-chat-proxy.grok.com/v1/responses")))
+	require.True(t, isGrokBuildTLSHost(mustReq("https://api.x.ai/v1/responses")))
+	require.True(t, isGrokBuildTLSHost(mustReq("https://us-east-1.api.x.ai/v1/responses")))
+	require.False(t, isGrokBuildTLSHost(mustReq("http://cli-chat-proxy.grok.com/v1/responses")))
+	require.False(t, isGrokBuildTLSHost(mustReq("https://relay.example.test/v1/responses")))
+	require.False(t, isGrokBuildTLSHost(nil))
+}
+
+func TestGrokBuildTLSTransportEnablesHTTP2(t *testing.T) {
+	h2RT, err := buildGrokHTTP2Transport(poolSettings{
+		maxIdleConns:          1,
+		maxIdleConnsPerHost:   1,
+		maxConnsPerHost:       1,
+		idleConnTimeout:       time.Second,
+		responseHeaderTimeout: time.Second,
+	}, nil, tlsfingerprint.GrokBuildProfile())
+	require.NoError(t, err)
+	h2, ok := h2RT.(*http2.Transport)
+	require.True(t, ok)
+	require.NotNil(t, h2.DialTLSContext)
+	require.Equal(t, 20*time.Second, h2.ReadIdleTimeout)
+	require.Equal(t, 10*time.Second, h2.PingTimeout)
+
+	claudeTransport, err := buildUpstreamTransportWithTLSFingerprint(poolSettings{
+		maxIdleConns:          1,
+		maxIdleConnsPerHost:   1,
+		maxConnsPerHost:       1,
+		idleConnTimeout:       time.Second,
+		responseHeaderTimeout: time.Second,
+	}, nil, &tlsfingerprint.Profile{Name: "claude", ALPNProtocols: []string{"http/1.1"}})
+	require.NoError(t, err)
+	require.False(t, claudeTransport.ForceAttemptHTTP2)
 }
 
 // HTTPUpstreamSuite HTTP 上游服务测试套件

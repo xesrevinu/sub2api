@@ -1,14 +1,21 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
+
+var grokTurnCounters sync.Map // session -> *uint64
 
 // grokUpstreamUserAgent is kept for compatibility with older Grok request
 // tests. Current requests use the pinned default UA from this package.
@@ -33,9 +40,71 @@ func applyDefaultGrokUpstreamHeaders(req *http.Request) {
 	}
 	// Always stamp CLI identity. Do not preserve inbound client UA (Claude Code,
 	// Codex, curl, etc.) — xAI chat/CLI surfaces fingerprint the client string.
-	req.Header.Set("User-Agent", defaultGrokUpstreamUserAgent())
-	req.Header.Set("x-grok-client-version", xai.ResolveCLIVersion())
-	req.Header.Set("x-grok-client-identifier", grokClientIdentifierHeader)
+	xai.ApplyCLIIdentityHeaders(req.Header, xai.ResolveCLIVersion())
+}
+
+func applyGrokCLIAccountHeaders(headers http.Header, account *Account) {
+	if headers == nil || account == nil {
+		return
+	}
+	// x-email/x-userid appear on Grok Build settings/models requests; they are
+	// intentionally not added to inference requests by the local CLI.
+	if email := account.GetGrokEmail(); email != "" {
+		headers.Set("x-email", email)
+	}
+	if userID := account.GetGrokUserID(); userID != "" {
+		headers.Set("x-userid", userID)
+		headers.Set("x-grok-user-id", userID)
+	}
+	if account.ID > 0 {
+		headers.Set("x-grok-agent-id", grokStableAgentID(account.ID))
+	}
+}
+
+func applyGrokCLIInferenceAccountHeaders(headers http.Header, account *Account) {
+	if headers == nil || account == nil {
+		return
+	}
+	if userID := account.GetGrokUserID(); userID != "" {
+		headers.Set("x-grok-user-id", userID)
+	}
+	if account.ID > 0 {
+		headers.Set("x-grok-agent-id", grokStableAgentID(account.ID))
+	}
+}
+
+func applyGrokCLITurnHeaders(headers http.Header, model, cacheIdentity string) {
+	if headers == nil {
+		return
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		headers.Set("x-grok-model-override", model)
+	}
+	if cacheIdentity = strings.TrimSpace(cacheIdentity); cacheIdentity != "" {
+		headers.Set(grokConversationIDHeader, cacheIdentity)
+		headers.Set("x-grok-session-id", cacheIdentity)
+	}
+	headers.Set("x-grok-req-id", uuid.NewString())
+	headers.Set("x-grok-doom-loop-check", "true")
+	headers.Set("x-grok-turn-idx", grokTurnIndex(cacheIdentity))
+}
+
+func applyGrokOAuthInferenceHeaders(headers http.Header, account *Account, model, cacheIdentity string) {
+	applyGrokCLIHeaders(headers)
+	applyGrokCLIInferenceAccountHeaders(headers, account)
+	applyGrokCLITurnHeaders(headers, model, cacheIdentity)
+}
+
+func grokTurnIndex(session string) string {
+	if strings.TrimSpace(session) == "" {
+		session = "_"
+	}
+	counter, _ := grokTurnCounters.LoadOrStore(session, new(uint64))
+	return strconv.FormatUint(atomic.AddUint64(counter.(*uint64), 1), 10)
+}
+
+func grokStableAgentID(accountID int64) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("sub2api/grok-agent/%d", accountID))).String()
 }
 
 func applyGrokTLSProfileHeaders(req *http.Request, profile *tlsfingerprint.Profile) {

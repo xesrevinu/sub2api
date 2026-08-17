@@ -206,7 +206,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, err
 		}
 		grokMixedCacheIntentBody := append([]byte(nil), body...)
-		body, err = applyGrokResponsesCacheIdentity(body, grokIntentSourceBody, grokCacheIdentity, account.IsGrokOAuth())
+		body, err = applyGrokResponsesCacheIdentity(body, grokIntentSourceBody, grokCacheIdentity, grokFreeCacheInjectionEnabled(account))
 		if err != nil {
 			releaseUpstreamCtx()
 			return nil, fmt.Errorf("apply grok prompt cache identity: %w", err)
@@ -219,6 +219,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, body, token, grokCacheIdentity, s.cfg, s.settingService)
 	} else {
 		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+		// The WS HTTP bridge forwards to the upstream Responses endpoint, which
+		// only accepts POST. The passthrough builder inherits the client method,
+		// but the bridge's gin context is a WebSocket upgrade (GET) request.
+		if upstreamReq != nil {
+			upstreamReq.Method = http.MethodPost
+		}
 	}
 	releaseUpstreamCtx()
 	if err != nil {

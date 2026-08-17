@@ -221,12 +221,7 @@ func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context,
 		// probes and only forward account identity headers to that trusted host.
 		applyGrokCLIHeaders(req.Header)
 		if isGrokCLIProxyTarget(req.URL.String()) {
-			if userID := strings.TrimSpace(account.GetCredential("sub")); userID != "" {
-				req.Header.Set("X-UserID", userID)
-			}
-			if email := strings.TrimSpace(account.GetCredential("email")); email != "" {
-				req.Header.Set("X-Email", email)
-			}
+			applyGrokCLIAccountHeaders(req.Header, account)
 		}
 	}
 	account.ApplyHeaderOverrides(req.Header)
