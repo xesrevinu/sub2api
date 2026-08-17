@@ -62,6 +62,34 @@ func TestGolden_SingleToolCall(t *testing.T) {
 	require.Equal(t, "need to run curl", asst.ReasoningContent)
 }
 
+// A tool-call turn also ends with a plain assistant answer. DeepSeek requires
+// that final assistant message to carry its reasoning_content too; otherwise a
+// later request that still sends tools gets the thinking-mode 400.
+func TestGolden_ToolTurnFinalAssistantKeepsReasoningContent(t *testing.T) {
+	msgs := convertGolden(t, `[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"latest sha?"}]},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"need to run curl"}]},
+		{"type":"function_call","call_id":"call_a","name":"exec_command","arguments":"{\"cmd\":\"curl x\"}"},
+		{"type":"function_call_output","call_id":"call_a","output":"deadbeef"},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"summarize result"}]},
+		{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}
+	]`)
+	assertChatInvariants(t, msgs)
+
+	var finalAnswer *ChatMessage
+	for i := range msgs {
+		if len(msgs[i].ToolCalls) > 0 {
+			require.Equal(t, "need to run curl", msgs[i].ReasoningContent)
+		}
+		if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) == 0 {
+			finalAnswer = &msgs[i]
+		}
+	}
+	require.NotNil(t, finalAnswer)
+	require.Equal(t, "done", chatMessageContentText(finalAnswer.Content))
+	require.Equal(t, "summarize result", finalAnswer.ReasoningContent)
+}
+
 // Golden sample: parallel tool calls (codex runs git log + git tag at once).
 func TestGolden_ParallelToolCalls(t *testing.T) {
 	msgs := convertGolden(t, `[
