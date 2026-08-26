@@ -124,12 +124,12 @@ packages = with pkgs; [
 ];
 ```
 
-但要注意：`go_1_26` 不一定等于上游 `go.mod` 要求的精确 patch 版本。
+但要注意：`go_1_26` 不一定等于上游 `go.mod` 要求的精确版本。
 
 例如本次升级后：
 
-- `backend/go.mod` 要求 `go 1.26.6`
-- 本机 Go 版本低于该 patch 时，直接跑 `go test` 会触发自动下载 `go1.26.6`
+- `backend/go.mod` 要求 `go 1.27.0`
+- 本机 Nix `go_1_26` 低于该版本时，直接跑 `go test` 会触发自动下载 `go1.27.0`
 - `GOTOOLCHAIN=local` 会因为版本不足失败
 
 检查方式：
@@ -142,7 +142,7 @@ sed -n '1,5p' backend/go.mod
 如果本机 Go 验证被工具链下载卡住，优先用 Docker 构建验证；本地 Compose 的 `GOLANG_IMAGE` 必须与当前 `backend/go.mod` 的 Go 版本一致：
 
 ```yaml
-GOLANG_IMAGE: public.ecr.aws/docker/library/golang:1.26.6-alpine
+GOLANG_IMAGE: public.ecr.aws/docker/library/golang:1.27.0-alpine
 ```
 
 ## 6. 推荐验证命令
@@ -245,10 +245,10 @@ ForwardAsChatCompletions(..., defaultMappedModel)
 如果看到：
 
 ```text
-go.mod requires go >= 1.26.6 (running go 1.26.1; GOTOOLCHAIN=local)
+go.mod requires go >= 1.27.0 (running go 1.26.1; GOTOOLCHAIN=local)
 ```
 
-说明 Nix 当前 `go_1_26` 落后于 `go.mod` patch 版本。不要为了升级临时改 `go.mod`，优先用 Docker 的 `golang:1.26.6-alpine` 构建验证。
+说明 Nix 当前 `go_1_26` 落后于 `go.mod` 要求的 Go 版本。不要为了升级临时改 `go.mod`，优先用 Docker 的 `golang:1.27.0-alpine` 构建验证。
 
 ## 9. 升级后检查清单
 
