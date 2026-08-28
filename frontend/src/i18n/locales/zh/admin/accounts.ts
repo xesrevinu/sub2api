@@ -962,6 +962,10 @@ export default {
           override_disabled: '手工强制禁用'
         }
       },
+      grokForcePriority: {
+        title: '强制 Priority',
+        hint: 'Grok CLI 没有 service_tier 开关。开启后，该账号的文本 Responses/Chat Completions 会注入 service_tier=priority。OAuth 默认开启，API Key 默认关闭（上游回显 priority 时按 2x 计费）。图像/视频/音频不受影响。'
+      },
       autoPauseOnExpired: '过期自动暂停调度',
       autoPauseOnExpiredDesc: '启用后，账号过期将自动暂停调度',
 	  autoPause5hThreshold: '5h 用量阈值(%)',

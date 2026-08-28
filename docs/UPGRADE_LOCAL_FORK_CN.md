@@ -97,6 +97,8 @@ Grok Build 定制的完整记录见 `docs/FORK_GROK_BUILD_ALIGNMENT.md`，核心
 - `backend/internal/repository/http_upstream.go`
 - `backend/internal/service/grok_upstream_headers.go`
 - `backend/internal/service/openai_gateway_grok.go`
+- `backend/internal/service/grok_force_priority.go`
+- `backend/internal/service/openai_gateway_chat_completions_raw.go`
 
 同步后建议确认这些符号还在：
 
@@ -104,8 +106,8 @@ Grok Build 定制的完整记录见 `docs/FORK_GROK_BUILD_ALIGNMENT.md`，核心
 rg -n 'ForwardPassthrough|IsOpenAIForcePassthrough|openAICompactRelayGroupName|openAIPassthroughRequestPath' \
   backend/internal/handler backend/internal/service
 
-rg -n 'GrokBuildProfileName|ApplyCLIIdentityHeaders|applyGrokOAuthInferenceHeaders|grok-pager/1.0.3' \
-  backend/internal/pkg backend/internal/repository backend/internal/service
+rg -n 'GrokBuildProfileName|ApplyCLIIdentityHeaders|applyGrokOAuthInferenceHeaders|grok-pager/1.0.3|applyGrokForcePriorityServiceTier|grok_force_priority_service_tier' \
+  backend/internal/pkg backend/internal/repository backend/internal/service frontend/src/components/account
 ```
 
 ## 5. Flake 和 Go 版本注意点
@@ -262,6 +264,7 @@ go.mod requires go >= 1.27.0 (running go 1.26.1; GOTOOLCHAIN=local)
 - `/api/relay/openai/v1/chat/completions` 相关逻辑没有被上游改回 `/v1/responses`
 - Grok 身份仍是 `grok-pager/1.0.3`，Grok 官方域仍走 `Grok Build (rustls 0.23)` + HTTP/2
 - Grok OAuth 推理请求仍不带 `x-email` / `x-userid`
+- Grok 强制 Priority 仍是账号 extra（`grok_force_priority_service_tier`），OAuth 默认开、API Key 默认关
 
 最终状态检查：
 

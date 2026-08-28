@@ -831,6 +831,7 @@ func TestBuildGrokResponsesRequestUsesAccountBaseURLAndBearerToken(t *testing.T)
 		Credentials: map[string]any{
 			"base_url": "https://xai.test/v1/",
 		},
+		Extra: map[string]any{GrokForcePriorityServiceTierExtraKey: false},
 	}
 
 	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token", "isolated-cache-id", nil)

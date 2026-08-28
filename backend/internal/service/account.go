@@ -113,6 +113,12 @@ const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 // absent/null value uses provider observations.
 const GrokMediaEligibleExtraKey = "grok_media_eligible"
 
+// GrokForcePriorityServiceTierExtraKey is a per-account switch stored in
+// accounts.extra. When true, Grok text Responses/Chat Completions inject
+// service_tier=priority. Missing values default on for Grok OAuth (CLI has no
+// client switch) and off for API-key accounts.
+const GrokForcePriorityServiceTierExtraKey = "grok_force_priority_service_tier"
+
 const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"

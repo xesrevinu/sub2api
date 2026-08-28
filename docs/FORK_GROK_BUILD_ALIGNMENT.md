@@ -36,7 +36,20 @@ API Key 流量走 `api.x.ai`，故意不加 CLI 身份头；`api.x.ai` 回退时
 - 不带 `x-email` / `x-userid`，但带账号里的 `x-grok-user-id`
 - `Accept` 按是否 stream 区分：stream `text/event-stream`，非 stream `application/json`
 
-## 5. 主要改动文件
+## 5. 账号级强制 Priority
+
+Grok CLI 没有 `service_tier` 开关，也不会发这个字段。fork 把开关放在账号 `extra.grok_force_priority_service_tier`，而不是 yaml 或系统设置：
+
+- 账号上写了 `true` / `false` 就按这个走
+- 未设置：Grok OAuth 默认开启（CLI 补不了这个字段），API Key 默认关闭
+- 非法值按关闭处理
+- 开启后，该账号的文本 Responses / Chat Completions 注入 `service_tier=priority`
+- 图像 / 视频 / 音频不注入
+- API Key 只有上游回显 `priority` 才按 2x 计费
+
+管理后台：编辑任意 Grok 账号（OAuth 与 API Key）可见「强制 Priority」。保存时会把明确布尔值写回 extra，避免下次被默认值盖掉。
+
+## 6. 主要改动文件
 
 同步时最容易冲突的位置：
 
@@ -48,16 +61,21 @@ API Key 流量走 `api.x.ai`，故意不加 CLI 身份头；`api.x.ai` 回退时
 - `backend/internal/repository/http_upstream_test.go`
 - `backend/internal/service/grok_upstream_headers.go`
 - `backend/internal/service/openai_gateway_grok.go`
+- `backend/internal/service/grok_force_priority.go`
+- `backend/internal/service/openai_gateway_chat_completions_raw.go`
+- `backend/internal/service/account.go`
+- `backend/internal/service/admin_account.go`
+- `frontend/src/components/account/EditAccountModal.vue`
 - `backend/internal/service/gateway_service.go`
 - `backend/internal/service/grok_media.go`
 - `backend/internal/service/grok_audio.go`
 - `backend/internal/service/upstream_models.go`
 - `backend/internal/service/grok_quota_service.go`
 
-## 6. 同步后回归检查
+## 7. 同步后回归检查
 
 ```bash
-cd backend && go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint ./internal/repository ./internal/service -run 'Grok|CLI|UpstreamHeaders|BuildGrok'
+cd backend && go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint ./internal/repository ./internal/service -run 'Grok|CLI|UpstreamHeaders|BuildGrok|ForcePriority'
 ```
 
 线上验证：
@@ -65,3 +83,4 @@ cd backend && go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint ./interna
 - Grok OAuth 账号请求必须走 `cli-chat-proxy.grok.com`
 - 日志应出现 `profile: "Grok Build (rustls 0.23)"` 和 `alpn: "h2"`
 - 真实 `POST /v1/responses` 应返回 `grok-4.5-build` 等订阅模型
+- 未改 extra 的 Grok OAuth 文本请求应带 `service_tier=priority`；API Key 默认不带；账号编辑页可单独开关

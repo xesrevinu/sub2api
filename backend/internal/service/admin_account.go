@@ -482,6 +482,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	accountExtra, err = normalizeGrokForcePriorityServiceTierExtra(input.Platform, accountExtra)
+	if err != nil {
+		return nil, err
+	}
 	accountExtra, err = normalizeOpenAIAutoResetCreditExtra(input.Platform, input.Type, false, accountExtra)
 	if err != nil {
 		return nil, err
@@ -581,6 +585,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 		normalizedExtra, err = normalizeGrokMediaEligibilityUpdateExtra(account, input, normalizedExtra)
+		if err != nil {
+			return nil, err
+		}
+		normalizedExtra, err = normalizeGrokForcePriorityServiceTierUpdateExtra(account, input, normalizedExtra)
 		if err != nil {
 			return nil, err
 		}

@@ -892,6 +892,10 @@ export default {
           override_disabled: 'Manually forced disabled'
         }
       },
+      grokForcePriority: {
+        title: 'Force Priority',
+        hint: 'Grok CLI has no service_tier switch. When enabled, this account’s text Responses/Chat Completions inject service_tier=priority. OAuth defaults on; API keys default off (billed 2x only when the upstream response echoes priority). Image, video, and audio are unchanged.'
+      },
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
 	  autoPause5hThreshold: '5h Usage Threshold (%)',

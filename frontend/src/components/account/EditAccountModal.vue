@@ -579,6 +579,26 @@
 
       </div>
 
+      <!-- Grok account-level Priority injection (CLI has no service_tier switch) -->
+      <div
+        v-if="account.platform === 'grok'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.grokForcePriority.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.grokForcePriority.hint') }}
+            </p>
+          </div>
+          <Toggle
+            v-model="grokForcePriorityEnabled"
+            data-testid="grok-force-priority-toggle"
+            :aria-label="t('admin.accounts.grokForcePriority.title')"
+          />
+        </div>
+      </div>
+
       <!-- Grok OAuth client-tool prompt cache opt-in -->
       <div
         v-if="account.platform === 'grok' && account.type === 'oauth'"
@@ -3347,6 +3367,7 @@ const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const GROK_CLIENT_TOOL_CACHE_EXTRA_KEY = 'grok_client_tool_cache_enabled'
+const GROK_FORCE_PRIORITY_EXTRA_KEY = 'grok_force_priority_service_tier'
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
@@ -3438,6 +3459,8 @@ const loadGrokMediaEligibility = async (accountID: number): Promise<GrokMediaEli
     }
   }
 }
+// Grok OAuth defaults on (CLI cannot send service_tier). API keys default off.
+const grokForcePriorityEnabled = ref(false)
 
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
@@ -4190,6 +4213,15 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   } else {
     grokMediaEligibilityRequestVersion++
   }
+  const grokForcePrioritySetting =
+    newAccount.platform === 'grok'
+      ? newAccount.extra?.[GROK_FORCE_PRIORITY_EXTRA_KEY]
+      : undefined
+  grokForcePriorityEnabled.value =
+    grokForcePrioritySetting === true ||
+    (grokForcePrioritySetting === undefined &&
+      newAccount.platform === 'grok' &&
+      newAccount.type === 'oauth')
   if (newAccount.platform === 'grok' && newAccount.type === 'oauth' && newAccount.credentials) {
     const grokCreds = newAccount.credentials as Record<string, unknown>
     if (isCustomGrokBaseUrl(grokCreds.base_url)) {
@@ -5318,6 +5350,17 @@ const handleSubmit = async () => {
       // Persist both states so a disabled account remains opted out when the
       // backend applies the default-enabled policy to missing values.
       newExtra[GROK_CLIENT_TOOL_CACHE_EXTRA_KEY] = grokClientToolCacheEnabled.value
+      updatePayload.extra = newExtra
+    }
+
+    // Persist an explicit bool so OAuth default-on / API-key default-off
+    // stay stable after the first edit.
+    if (props.account.platform === 'grok') {
+      const currentExtra =
+        (updatePayload.extra as Record<string, unknown>) ||
+        ((props.account.extra as Record<string, unknown>) || {})
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      newExtra[GROK_FORCE_PRIORITY_EXTRA_KEY] = grokForcePriorityEnabled.value
       updatePayload.extra = newExtra
     }
 

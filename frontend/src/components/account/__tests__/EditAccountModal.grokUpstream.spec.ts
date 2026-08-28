@@ -323,4 +323,96 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
       wrapper.get('[data-testid="grok-client-tool-cache-toggle"]').attributes('aria-checked')
     ).toBe('false')
   })
+
+  it('shows the force-priority switch for Grok OAuth and API-key accounts', () => {
+    const grokOAuthWrapper = mountModal(buildGrokOAuthAccount())
+    expect(grokOAuthWrapper.find('[data-testid="grok-force-priority-toggle"]').exists()).toBe(true)
+
+    const grokAPIKeyWrapper = mountModal({
+      ...buildGrokOAuthAccount(),
+      type: 'apikey',
+      credentials: { api_key: 'xai-test', base_url: 'https://api.x.ai/v1' }
+    })
+    expect(grokAPIKeyWrapper.find('[data-testid="grok-force-priority-toggle"]').exists()).toBe(true)
+
+    const openAIOAuthWrapper = mountModal({
+      ...buildGrokOAuthAccount(),
+      platform: 'openai'
+    })
+    expect(openAIOAuthWrapper.find('[data-testid="grok-force-priority-toggle"]').exists()).toBe(false)
+  })
+
+  it('defaults force-priority on for Grok OAuth and persists an explicit true', async () => {
+    const account = buildGrokOAuthAccount({}, { custom_setting: 'keep-me' })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="grok-force-priority-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(updateAccountMock).toHaveBeenCalledTimes(1))
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra).toMatchObject({
+      grok_force_priority_service_tier: true,
+      custom_setting: 'keep-me'
+    })
+  })
+
+  it('defaults force-priority off for Grok API-key accounts and can opt in', async () => {
+    const account = {
+      ...buildGrokOAuthAccount({}, { custom_setting: 'keep-me' }),
+      type: 'apikey',
+      credentials: { api_key: 'xai-test', base_url: 'https://api.x.ai/v1' }
+    }
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="grok-force-priority-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(updateAccountMock).toHaveBeenCalledTimes(1))
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra).toMatchObject({
+      grok_force_priority_service_tier: true,
+      custom_setting: 'keep-me'
+    })
+  })
+
+  it('keeps an explicit force-priority opt-out when saving an untouched OAuth account', async () => {
+    const account = buildGrokOAuthAccount(
+      {},
+      {
+        grok_force_priority_service_tier: false,
+        custom_setting: 'keep-me'
+      }
+    )
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="grok-force-priority-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(updateAccountMock).toHaveBeenCalledTimes(1))
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra).toMatchObject({
+      grok_force_priority_service_tier: false,
+      custom_setting: 'keep-me'
+    })
+  })
+
+  it('shows malformed force-priority settings as disabled so the UI matches the fail-closed backend', () => {
+    const wrapper = mountModal(
+      buildGrokOAuthAccount({}, { grok_force_priority_service_tier: 'true' })
+    )
+    expect(
+      wrapper.get('[data-testid="grok-force-priority-toggle"]').attributes('aria-checked')
+    ).toBe('false')
+  })
 })

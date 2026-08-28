@@ -106,7 +106,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	upstreamBody = updatedBody
 	// Keep the final outbound tier separate from the observed response tier so
 	// usage recording can apply the selected credential's response contract.
-	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
+	// Extract after Grok force-priority so injected service_tier is visible.
+	var serviceTier *string
 	if account.Platform == PlatformGrok {
 		strippedBody, stripErr := stripRedundantGrokChatViewImageTool(upstreamBody)
 		if stripErr != nil {
@@ -161,9 +162,14 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("sanitize Grok unsupported fields: %w", err)
 		}
+		upstreamBody, err = applyGrokForcePriorityServiceTier(upstreamBody, account)
+		if err != nil {
+			return nil, fmt.Errorf("apply grok force priority service_tier: %w", err)
+		}
 	}
 	upstreamBody = applyOllamaCloudRawChatCompletionsRequest(account, upstreamBody)
 	upstreamBody = clampOllamaCloudUpstreamMaxTokens(account, upstreamBody)
+	serviceTier = extractOpenAIServiceTierFromBody(upstreamBody)
 
 	logger.L().Debug("openai chat_completions raw: forwarding without protocol conversion",
 		zap.Int64("account_id", account.ID),
