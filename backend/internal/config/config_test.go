@@ -1958,6 +1958,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.stream_data_interval_timeout",
 		},
 		{
+			name:    "gateway stream data interval too high",
+			mutate:  func(c *Config) { c.Gateway.StreamDataIntervalTimeout = 901 },
+			wantErr: "gateway.stream_data_interval_timeout",
+		},
+		{
 			name:    "gateway stream data interval negative",
 			mutate:  func(c *Config) { c.Gateway.StreamDataIntervalTimeout = -1 },
 			wantErr: "gateway.stream_data_interval_timeout must be non-negative",

@@ -8,6 +8,7 @@ import (
 
 // Default Grok stream idle when gateway.stream_data_interval_timeout is 0.
 // Long enough for slow thinking models, short enough to release hung sockets.
+// Production k3s overrides this via GATEWAY_STREAM_DATA_INTERVAL_TIMEOUT (up to 900s).
 const defaultGrokStreamIdleTimeout = 180 * time.Second
 
 // Shorter cool after a Grok stream-idle failure so the account can re-enter soon
