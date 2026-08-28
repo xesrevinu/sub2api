@@ -674,6 +674,75 @@ func TestForwardGrokResponsesCodexAdditionalToolsUsesMixedCacheIntent(t *testing
 	require.Empty(t, upstream.lastReq.Header.Get(grokClientToolCacheOptInHeader))
 }
 
+func TestForwardGrokResponsesRecordsEchoedServiceTier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("priority echo is the billable tier", func(t *testing.T) {
+		body := []byte(`{"model":"grok-4.6","input":"reply with ok","stream":false}`)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+		account := healthyGrokOAuthGatewayTestAccount(351, "access-token")
+		repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{
+				"id":"resp_priority","object":"response","model":"grok-4.6-build","status":"completed",
+				"service_tier":"priority","output":[],"usage":{"input_tokens":4,"output_tokens":1}
+			}`)),
+		}}
+		svc := &OpenAIGatewayService{
+			httpUpstream:      upstream,
+			grokTokenProvider: NewGrokTokenProvider(repo, nil),
+			accountRepo:       repo,
+		}
+
+		result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok-4.6", false, time.Now())
+		require.NoError(t, err)
+		require.Equal(t, "priority", gjson.GetBytes(upstream.lastBody, "service_tier").String())
+		require.Equal(t, "priority", result.UpstreamResponseServiceTier)
+		require.NotNil(t, result.ServiceTier)
+		require.Equal(t, "priority", *result.ServiceTier)
+		require.False(t, ApplyOpenAIServiceTierBillingResolution(result).Downgraded)
+	})
+
+	t.Run("default echo means Grok did not honor Priority", func(t *testing.T) {
+		body := []byte(`{"model":"grok-4.6","input":"reply with ok","stream":false}`)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+		account := healthyGrokOAuthGatewayTestAccount(352, "access-token")
+		repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{
+				"id":"resp_default","object":"response","model":"grok-4.6-build","status":"completed",
+				"service_tier":"default","output":[],"usage":{"input_tokens":4,"output_tokens":1}
+			}`)),
+		}}
+		svc := &OpenAIGatewayService{
+			httpUpstream:      upstream,
+			grokTokenProvider: NewGrokTokenProvider(repo, nil),
+			accountRepo:       repo,
+		}
+
+		result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok-4.6", false, time.Now())
+		require.NoError(t, err)
+		require.Equal(t, "priority", gjson.GetBytes(upstream.lastBody, "service_tier").String())
+		require.Equal(t, "default", result.UpstreamResponseServiceTier)
+		require.NotNil(t, result.ServiceTier)
+		require.Equal(t, "priority", *result.ServiceTier)
+		resolution := ApplyOpenAIServiceTierBillingResolution(result)
+		require.True(t, resolution.Downgraded)
+		require.Equal(t, "default", resolution.Billing)
+		require.Equal(t, "default", *result.ServiceTier)
+	})
+}
+
 func TestForwardGrokResponsesClaudeDesktopClientToolsUseCacheRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

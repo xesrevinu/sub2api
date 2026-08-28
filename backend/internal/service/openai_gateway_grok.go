@@ -248,19 +248,25 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		usage = &OpenAIUsage{}
 	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
+	outboundTier := extractOpenAIServiceTierFromBody(patchedBody)
+	if grokForcePriorityServiceTierEnabled(account) {
+		outboundTier = normalizeOpenAIServiceTier(OpenAIFastTierPriority)
+	}
 	result := &OpenAIForwardResult{
-		RequestID:       firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
-		UpstreamHeaders: resp.Header,
-		ResponseID:      responseID,
-		Usage:           *usage,
-		Model:           originalModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		Stream:          reqStream,
-		OpenAIWSMode:    false,
-		ResponseHeaders: resp.Header.Clone(),
-		Duration:        time.Since(startTime),
-		FirstTokenMs:    firstTokenMs,
+		RequestID:                   firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+		UpstreamHeaders:             resp.Header,
+		ResponseID:                  responseID,
+		Usage:                       *usage,
+		Model:                       originalModel,
+		UpstreamModel:               upstreamModel,
+		ReasoningEffort:             reasoningEffort,
+		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
+		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, outboundTier),
+		Stream:                      reqStream,
+		OpenAIWSMode:                false,
+		ResponseHeaders:             resp.Header.Clone(),
+		Duration:                    time.Since(startTime),
+		FirstTokenMs:                firstTokenMs,
 	}
 	// Propagate search/image counters from the shared Responses handler — without
 	// this, stream/JSON counting runs but search_price_per_1k / image bills never apply.
