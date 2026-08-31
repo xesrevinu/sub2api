@@ -141,6 +141,96 @@ func cursorCostToModelPricing(cost cursorListCost) *ModelPricing {
 	}
 }
 
+// cursorSeriesUsesDisjointInputBuckets reports whether Cursor dashboard-style usage
+// keeps input/cache read/cache write as mutually exclusive counters (Claude family).
+func cursorSeriesUsesDisjointInputBuckets(series string) bool {
+	return strings.HasPrefix(series, "claude-")
+}
+
+// prefersCursorListPricing returns true when any billing candidate resolves to Cursor list prices.
+func prefersCursorListPricing(models []string) bool {
+	for _, model := range models {
+		if cursorListPricing(model) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeCursorBillingTokens maps usage into mutual-exclusive billing buckets using
+// Cursor dashboard semantics (CodexBar CursorUsageEventsFetcher / ccusage).
+//
+// Claude models bill disjoint input, cache read, and cache write counters directly.
+// Other Cursor models follow CostUsagePricing.codexCostUSD: merge disjoint counters
+// into a total prompt size, then clamp cache read/write as subsets. When upstream
+// already reports OpenAI-style totals (cache details are subsets of input_tokens),
+// subtract instead of merging to avoid double billing.
+func normalizeCursorBillingTokens(model string, tokens UsageTokens) UsageTokens {
+	series, ok := cursorClientSeriesID(model)
+	if !ok {
+		return tokens
+	}
+	input := maxInt(0, tokens.InputTokens)
+	cacheRead := maxInt(0, tokens.CacheReadTokens)
+	cacheCreation := maxInt(0, tokens.CacheCreationTokens)
+	out := UsageTokens{
+		OutputTokens:          maxInt(0, tokens.OutputTokens),
+		CacheCreation5mTokens:   maxInt(0, tokens.CacheCreation5mTokens),
+		CacheCreation1hTokens:   maxInt(0, tokens.CacheCreation1hTokens),
+		ImageInputTokens:        maxInt(0, tokens.ImageInputTokens),
+		ImageOutputTokens:       maxInt(0, tokens.ImageOutputTokens),
+	}
+	if cursorSeriesUsesDisjointInputBuckets(series) {
+		out.InputTokens = input
+		out.CacheReadTokens = cacheRead
+		out.CacheCreationTokens = cacheCreation
+		return out
+	}
+	if cacheRead+cacheCreation <= input {
+		out.InputTokens = input - cacheRead - cacheCreation
+		out.CacheReadTokens = cacheRead
+		out.CacheCreationTokens = cacheCreation
+		return out
+	}
+	totalInput := input + cacheRead + cacheCreation
+	cached := cacheRead
+	if cached > totalInput {
+		cached = totalInput
+	}
+	remaining := totalInput - cached
+	cacheWrite := cacheCreation
+	if cacheWrite > remaining {
+		cacheWrite = remaining
+	}
+	out.InputTokens = remaining - cacheWrite
+	out.CacheReadTokens = cached
+	out.CacheCreationTokens = cacheWrite
+	return out
+}
+
+// finalizeCursorBillingTokens normalizes Cursor usage then applies proxy-specific
+// pricing attribution. cursor-api-proxy reports prompt tokens as input_tokens with
+// cached_tokens=0; Cursor dashboard (CodexBar baseline) bills most prompt at cache-read
+// rates. When no cache breakdown is present, attribute prompt to cache read.
+func finalizeCursorBillingTokens(model string, tokens UsageTokens) UsageTokens {
+	tokens = normalizeCursorBillingTokens(model, tokens)
+	return cursorPromptWithoutBreakdownUsesCacheRead(tokens)
+}
+
+func cursorPromptWithoutBreakdownUsesCacheRead(tokens UsageTokens) UsageTokens {
+	if tokens.CacheReadTokens > 0 || tokens.CacheCreationTokens > 0 {
+		return tokens
+	}
+	prompt := tokens.InputTokens
+	if prompt <= 0 {
+		return tokens
+	}
+	out := tokens
+	out.InputTokens = 0
+	out.CacheReadTokens = prompt
+	return out
+}
+
 func isCursorClientModelID(model string) bool {
 	id := strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(id, "/"); idx >= 0 {

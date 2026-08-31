@@ -1747,7 +1747,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	// 官方长上下文阶梯仅在无区间定价时应用（区间定价已包含上下文分层）。
 	applyLongCtx := len(resolved.Intervals) == 0 && contextTierPricingEnabled
 
-	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
+	breakdown := s.computeTokenBreakdown(pricing, applyCursorBillingTokens(input.Model, input.Tokens), input.RateMultiplier, input.ServiceTier, applyLongCtx)
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
 	applyCostBreakdownMultiplier(breakdown, maxReasoningEffortBillingMultiplier(input.Model, input.ReasoningEffort, pricing))
 	return breakdown, nil
@@ -1970,6 +1970,13 @@ func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens,
 	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, channelPricing, true)
 }
 
+func applyCursorBillingTokens(model string, tokens UsageTokens) UsageTokens {
+	if cursorListPricing(model) == nil {
+		return tokens
+	}
+	return finalizeCursorBillingTokens(model, tokens)
+}
+
 func (s *BillingService) calculateCostInternalWithPolicy(
 	model string,
 	tokens UsageTokens,
@@ -1989,7 +1996,7 @@ func (s *BillingService) calculateCostInternalWithPolicy(
 		return nil, err
 	}
 
-	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
+	return s.computeTokenBreakdown(pricing, applyCursorBillingTokens(model, tokens), rateMultiplier, serviceTier, longContextBillingEnabled), nil
 }
 
 // applyModelSpecificPricingPolicy 对目录数据做模型特定修正：DeepSeek 官方价

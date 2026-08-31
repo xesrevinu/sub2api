@@ -81,3 +81,96 @@ func TestUsageBillingModelCandidates_PrefersCursorPrefixedOriginal(t *testing.T)
 	require.Equal(t, "cursor-kimi-k3-fast", candidates[0])
 	require.Contains(t, candidates, "kimi-k3-fast")
 }
+
+func TestNormalizeCursorBillingTokens_ClaudeUsesDisjointBuckets(t *testing.T) {
+	tokens := normalizeCursorBillingTokens("cursor-claude-4.5-sonnet", UsageTokens{
+		InputTokens:         100,
+		CacheReadTokens:     200,
+		CacheCreationTokens: 300,
+		OutputTokens:        50,
+	})
+	require.Equal(t, 100, tokens.InputTokens)
+	require.Equal(t, 200, tokens.CacheReadTokens)
+	require.Equal(t, 300, tokens.CacheCreationTokens)
+	require.Equal(t, 50, tokens.OutputTokens)
+}
+
+func TestNormalizeCursorBillingTokens_CodexMergesDisjointCounters(t *testing.T) {
+	tokens := normalizeCursorBillingTokens("cursor-gpt-5.4", UsageTokens{
+		InputTokens:         200,
+		CacheReadTokens:     800,
+		OutputTokens:        50,
+	})
+	require.Equal(t, 200, tokens.InputTokens)
+	require.Equal(t, 800, tokens.CacheReadTokens)
+	require.Zero(t, tokens.CacheCreationTokens)
+	require.Equal(t, 50, tokens.OutputTokens)
+}
+
+func TestNormalizeCursorBillingTokens_CodexSubtractsOpenAIStyleTotals(t *testing.T) {
+	tokens := normalizeCursorBillingTokens("cursor-gpt-5.4", UsageTokens{
+		InputTokens:         1000,
+		CacheReadTokens:     800,
+		CacheCreationTokens: 100,
+		OutputTokens:        50,
+	})
+	require.Equal(t, 100, tokens.InputTokens)
+	require.Equal(t, 800, tokens.CacheReadTokens)
+	require.Equal(t, 100, tokens.CacheCreationTokens)
+}
+
+func TestFinalizeCursorBillingTokens_ProxyPromptUsesCacheReadWhenNoBreakdown(t *testing.T) {
+	tokens := finalizeCursorBillingTokens("cursor-grok-4.6-fast", UsageTokens{
+		InputTokens:  1000,
+		OutputTokens: 50,
+	})
+	require.Zero(t, tokens.InputTokens)
+	require.Equal(t, 1000, tokens.CacheReadTokens)
+	require.Zero(t, tokens.CacheCreationTokens)
+}
+
+func TestFinalizeCursorBillingTokens_KeepsDashboardBreakdown(t *testing.T) {
+	tokens := finalizeCursorBillingTokens("cursor-gpt-5.4", UsageTokens{
+		InputTokens:     100,
+		CacheReadTokens: 200,
+		OutputTokens:    50,
+	})
+	require.Equal(t, 100, tokens.InputTokens)
+	require.Equal(t, 200, tokens.CacheReadTokens)
+}
+
+func TestCalculateCost_CursorClaudeMatchesDisjointListPricing(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("cursor-claude-4.5-sonnet", UsageTokens{
+		InputTokens:         100,
+		CacheReadTokens:     200,
+		CacheCreationTokens: 300,
+		OutputTokens:        50,
+	}, 1)
+	require.NoError(t, err)
+	expected := 100*3e-6 + 200*0.3e-6 + 300*3.75e-6 + 50*15e-6
+	require.InDelta(t, expected, cost.TotalCost, 1e-12)
+}
+
+func TestCalculateCost_CursorGPTWithoutCacheUsesCacheReadRate(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("cursor-gpt-5", UsageTokens{
+		InputTokens:  200,
+		OutputTokens: 20,
+	}, 1)
+	require.NoError(t, err)
+	expected := 200*0.125e-6 + 20*10e-6
+	require.InDelta(t, expected, cost.TotalCost, 1e-12)
+}
+
+func TestCalculateCost_CursorGPTOpenAIStyleTotalsAvoidDoubleBilling(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("cursor-composer-2.5", UsageTokens{
+		InputTokens:     1000,
+		CacheReadTokens: 800,
+		OutputTokens:    50,
+	}, 1)
+	require.NoError(t, err)
+	expected := 200*0.5e-6 + 800*0.2e-6 + 50*2.5e-6
+	require.InDelta(t, expected, cost.TotalCost, 1e-12)
+}
