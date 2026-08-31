@@ -580,3 +580,26 @@ Cursor 走本机/集群 `cursor-api-proxy` 时，客户端目录会给系列 id 
 cd backend && go test -tags unit ./internal/service -run 'CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult'
 ```
 
+## 15. 升级记录
+
+```text
+日期：2026-08-31
+上游：Wei-Shaw/sub2api origin/main @ 52374af94 (v0.1.184)
+本地合并提交：rebase origin/main（backup/pre-upstream-rebase-20260831）
+        214116c00 feat(billing): add Cursor list prices for cursor-* client ids
+        9ccc4ef95 fix(grok): pass account into service_tier billing resolution tests
+冲突文件：
+  - billing_service_test.go（保留上游 DeepSeek flash 兜底用例）
+  - openai_gateway_chat_completions_raw.go（serviceTier 延后到 Grok force-priority 之后提取）
+  - openai_gateway_grok_test.go（补 ApplyOpenAIServiceTierBillingResolution 的 account 参数）
+保留的本地功能：
+  - /api/relay/openai passthrough + openai-compact 优先
+  - Grok Build 身份/TLS + 账号级 force Priority
+  - Cursor cursor-* 价目 / 通配符捕获 mapping / 计费候选优先
+构建镜像：未构建（等确认后再更新 k8s）
+Docker 状态：未重启
+验证结果：
+  go test -tags unit ./internal/service -run 'CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult|ForcePriority|ApplyOpenAIServiceTier' 通过
+遗留问题：k8s 镜像仍是 rebase 前的 c93703cae，需确认后再部署
+```
+
