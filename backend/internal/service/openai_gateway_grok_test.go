@@ -705,7 +705,7 @@ func TestForwardGrokResponsesRecordsEchoedServiceTier(t *testing.T) {
 		require.Equal(t, "priority", result.UpstreamResponseServiceTier)
 		require.NotNil(t, result.ServiceTier)
 		require.Equal(t, "priority", *result.ServiceTier)
-		require.False(t, ApplyOpenAIServiceTierBillingResolution(result).Downgraded)
+		require.False(t, ApplyOpenAIServiceTierBillingResolution(account, result).Downgraded)
 	})
 
 	t.Run("default echo means Grok did not honor Priority", func(t *testing.T) {
@@ -736,7 +736,7 @@ func TestForwardGrokResponsesRecordsEchoedServiceTier(t *testing.T) {
 		require.Equal(t, "default", result.UpstreamResponseServiceTier)
 		require.NotNil(t, result.ServiceTier)
 		require.Equal(t, "priority", *result.ServiceTier)
-		resolution := ApplyOpenAIServiceTierBillingResolution(result)
+		resolution := ApplyOpenAIServiceTierBillingResolution(account, result)
 		require.True(t, resolution.Downgraded)
 		require.Equal(t, "default", resolution.Billing)
 		require.Equal(t, "default", *result.ServiceTier)
