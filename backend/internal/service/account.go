@@ -1077,7 +1077,22 @@ func matchWildcardMappingResult(mapping map[string]string, requestedModel string
 		return matches[i].pattern < matches[j].pattern
 	})
 
-	return matches[0].target, true
+	return applyWildcardMappingTarget(matches[0].pattern, matches[0].target, requestedModel), true
+}
+
+// applyWildcardMappingTarget substitutes the unmatched suffix into a target
+// that contains "*". `cursor-*` → `*` rewrites cursor-kimi-k3 to kimi-k3.
+// Targets without "*" keep the existing constant replacement.
+func applyWildcardMappingTarget(pattern, target, requested string) string {
+	if !strings.HasSuffix(pattern, "*") || !strings.Contains(target, "*") {
+		return target
+	}
+	prefix := strings.TrimSuffix(pattern, "*")
+	if prefix != "" && !strings.HasPrefix(requested, prefix) {
+		return target
+	}
+	captured := strings.TrimPrefix(requested, prefix)
+	return strings.Replace(target, "*", captured, 1)
 }
 
 func (a *Account) IsCustomErrorCodesEnabled() bool {

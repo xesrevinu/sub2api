@@ -93,6 +93,10 @@
 - `backend/internal/handler/endpoint.go`
 - `backend/internal/service/openai_gateway_service.go`
 - `backend/internal/service/openai_passthrough_context.go`
+- `backend/internal/service/cursor_pricing.go`
+- `backend/internal/service/cursor_pricing_test.go`
+- `backend/internal/service/billing_service.go`
+- `backend/internal/service/openai_model_alias.go`
 - `backend/internal/service/openai_gateway_service_test.go`
 - `backend/internal/service/openai_passthrough_context_test.go`
 - `backend/internal/handler/openai_relay_handler_test.go`
@@ -556,5 +560,23 @@ docker logs --tail 80 sub2api
 Docker 状态：
 验证结果：
 遗留问题：
+```
+
+## 14. Cursor 价目（`cursor-*` 客户端 id）
+
+Cursor 走本机/集群 `cursor-api-proxy` 时，客户端目录会给系列 id 加 `cursor-` 前缀（`kimi-k3` → `cursor-kimi-k3`）。proxy 自己会剥客户端前缀；Grok 原生 id（`cursor-grok-4.6`）不能剥。
+
+计费必须认**原始** `cursor-*` 名称，不能落到 Grok Build / Moonshot 卡上：
+
+- `GetModelPricing` / `HasIdentifiedTokenPricing` 对 `cursor-` 前缀走 Cursor 官网价目（https://cursor.com/docs/models-and-pricing）
+- Fast 是模型 id 后缀 `-fast`，不是 OpenAI `service_tier`；Composer Fast 是 6x，Grok 4.5 Fast 的 output 是 3x，其余未单独标价的 Fast 默认 2x
+- 未加前缀的 `composer-2.5` / `grok-composer-2.5-fast` 仍走 xAI Grok Build 卡
+- 计费候选会把 `cursor-*` 排到前面，避免映射剥前缀后先命中 Kimi/Grok fallback
+- 账号 `model_mapping` 支持捕获改写：`cursor-*` → `*` 会把 `cursor-kimi-k3` 变成 `kimi-k3`；更长的 `cursor-grok-*` → `cursor-grok-*` 优先。当前线上 Cursor 账号用 **passthrough + 恒等 mapping**（不改写，只给 `/v1/models` 挂目录）
+
+回归：
+
+```bash
+cd backend && go test -tags unit ./internal/service -run 'CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult'
 ```
 

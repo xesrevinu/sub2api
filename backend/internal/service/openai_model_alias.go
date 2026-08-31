@@ -140,7 +140,26 @@ func usageBillingModelCandidates(primary string, alternates ...string) []string 
 	for _, alternate := range alternates {
 		candidates = appendUsageBillingModelCandidate(candidates, seen, alternate)
 	}
-	return candidates
+	return preferCursorClientBillingModels(candidates)
+}
+
+func preferCursorClientBillingModels(candidates []string) []string {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	preferred := make([]string, 0, len(candidates))
+	rest := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if isCursorClientModelID(candidate) {
+			preferred = append(preferred, candidate)
+			continue
+		}
+		rest = append(rest, candidate)
+	}
+	if len(preferred) == 0 {
+		return candidates
+	}
+	return append(preferred, rest...)
 }
 
 func firstUsageBillingModel(candidates []string) string {
