@@ -1256,6 +1256,9 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if src.ImageOutputTokens > 0 {
 		dst.ImageOutputTokens = src.ImageOutputTokens
 	}
+	if src.CostInUsdTicks > 0 {
+		dst.CostInUsdTicks = src.CostInUsdTicks
+	}
 }
 
 func openAIUsageHasTokens(usage *OpenAIUsage) bool {
@@ -1540,6 +1543,7 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
 		ImageOutputTokens:        int(imageOutputTokens),
+		CostInUsdTicks:           value.Get("cost_in_usd_ticks").Int(),
 	}, true
 }
 

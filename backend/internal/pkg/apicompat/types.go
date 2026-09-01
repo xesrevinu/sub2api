@@ -503,10 +503,11 @@ type ResponsesSummary struct {
 
 // ResponsesUsage holds token counts in Responses API format.
 type ResponsesUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	TotalTokens              int `json:"total_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	InputTokens              int   `json:"input_tokens"`
+	OutputTokens             int   `json:"output_tokens"`
+	TotalTokens              int   `json:"total_tokens"`
+	CacheCreationInputTokens int   `json:"cache_creation_input_tokens,omitempty"`
+	CostInUsdTicks           int64 `json:"cost_in_usd_ticks,omitempty"`
 
 	// Optional detailed breakdown
 	InputTokensDetails  *ResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`

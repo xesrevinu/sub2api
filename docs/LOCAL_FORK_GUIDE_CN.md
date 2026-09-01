@@ -356,6 +356,7 @@ git rebase --continue
 3. relay passthrough 是否仍优先 `openai-compact`
 4. `usage_logs` 是否仍正确记录 `/v1/chat/completions`
 5. Grok 身份 / TLS / 账号级 Priority 是否仍在（见第 11 节）
+6. Grok 长上下文 / `cost_in_usd_ticks` 是否仍在（见第 16 节）
 
 同步后建议确认这些符号还在：
 
@@ -449,6 +450,7 @@ API Key 流量走 `api.x.ai`，故意不加 CLI 身份头；`api.x.ai` 回退时
 - `backend/internal/pkg/xai/cli_identity.go`
 - `backend/internal/pkg/xai/billing.go`
 - `backend/internal/pkg/xai/billing_test.go`
+- `backend/internal/service/grok_upstream_cost.go`
 - `backend/internal/pkg/tlsfingerprint/grok_build.go`
 - `backend/internal/repository/http_upstream.go`
 - `backend/internal/repository/http_upstream_test.go`
@@ -538,6 +540,7 @@ if apiKey.Group != nil {
 - Grok 身份仍是 `grok-pager/1.0.3`，Grok 官方域仍走 `Grok Build (rustls 0.23)` + HTTP/2
 - Grok OAuth 推理请求仍不带 `x-email` / `x-userid`
 - Grok 强制 Priority 仍是账号 extra（`grok_force_priority_service_tier`），OAuth 默认开、API Key 默认关
+- Grok 文本 usage 仍解析 `cost_in_usd_ticks`，Grok 账号仍用 ticks 覆盖总额
 
 最终状态检查：
 
@@ -602,4 +605,44 @@ Docker 状态：未重启
   go test -tags unit ./internal/service -run 'CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult|ForcePriority|ApplyOpenAIServiceTier' 通过
 遗留问题：k8s 镜像仍是 rebase 前的 c93703cae，需确认后再部署
 ```
+
+```text
+日期：2026-09-01
+上游：Wei-Shaw/sub2api origin/main @ a2fb09260 (v0.1.185)
+本地合并提交：rebase origin/main
+冲突文件：
+  - billing_service.go（上游已删 GPT-5.4 长上下文常量；保留 fork 的 cnyToUSDFallbackExchangeRate）
+保留的本地功能：
+  - /api/relay/openai passthrough + openai-compact 优先
+  - Grok Build 身份/TLS + 账号级 force Priority
+  - Cursor cursor-* 价目 / 通配符捕获 mapping / 计费候选优先
+  - Grok 上游 cost_in_usd_ticks 覆盖 TotalCost/ActualCost（见第 16 节）
+构建镜像：未构建（等确认后再更新 k8s）
+Docker 状态：未重启
+验证结果：
+  go test -tags unit ./internal/pkg/xai ./internal/service -run 'CostUSDFromTicks|OpenAIUsageFromGJSONParsesCostInUsdTicks|ApplyGrokUpstreamReportedCost|Grok46|XAIThresholdInclusive' 通过
+遗留问题：k8s 仍跑 rebase 前镜像 sub2api-local:23276556c-amd64，需部署后 LiteLLM above_200k 折算和 ticks 才会进线上 usage_logs
+```
+
+## 16. Grok Build 自用额度（2026-09-01）
+
+Grok OAuth 走 `cli-chat-proxy` 的 **GrokBuild 周 credits**，不是向用户售卖。官方价卡（https://docs.x.ai/developers/pricing）：
+
+- grok-4.6：prompt < 200k 时 $2 / $0.50 cached / $6；含 cache 的 prompt ≥200k 时整单 2x
+- cache 单独按 cached input 计价，不是免单
+- 响应 `usage.cost_in_usd_ticks`（1 USD = 10^10 ticks）是单次真实扣费
+
+上游 v0.1.185 已把 LiteLLM 的 `*_above_200k_tokens` 折成 `long_context_*` 阈值+倍率，xAI 阈值语义为达到即进高档。本 fork 在此之上：
+
+- 解析并合并 `cost_in_usd_ticks`
+- Grok 账号记账时用 ticks 覆盖 `TotalCost`/`ActualCost`（分项仍是本地估算，便于核对 cache）
+- 无 ticks 的历史日志按「uncached + cache ≥ 200k 则 actual_cost×2」回算
+
+相关文件：
+
+- `backend/internal/service/pricing_service.go`（上游目录折算）
+- `backend/internal/pkg/xai/billing.go`（`USDTicksPerDollar`）
+- `backend/internal/service/grok_upstream_cost.go`
+- `backend/internal/service/openai_gateway_usage.go`
+- `backend/internal/service/openai_gateway_response_handling.go`
 

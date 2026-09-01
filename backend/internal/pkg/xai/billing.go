@@ -24,6 +24,10 @@ const (
 	BillingWeeklyPath  = "/billing?format=credits"
 	BillingMonthlyPath = "/billing"
 
+	// USDTicksPerDollar is the scale of usage.cost_in_usd_ticks on xAI
+	// inference responses: 1 USD = 10^10 ticks.
+	USDTicksPerDollar int64 = 10_000_000_000
+
 	SuperGrokLimitCents      = 15_000  // $150.00
 	SuperGrokHeavyLimitCents = 150_000 // $1,500.00
 )
@@ -450,4 +454,12 @@ func cloneFloat(v *float64) *float64 {
 	}
 	f := *v
 	return &f
+}
+
+// CostUSDFromTicks converts xAI usage.cost_in_usd_ticks into dollars.
+func CostUSDFromTicks(ticks int64) (float64, bool) {
+	if ticks <= 0 {
+		return 0, false
+	}
+	return float64(ticks) / float64(USDTicksPerDollar), true
 }

@@ -1339,6 +1339,7 @@ func TestGetModelPricing_Grok46OfficialFallback(t *testing.T) {
 			require.Equal(t, 200000, pricing.LongContextInputThreshold)
 			require.InDelta(t, 2.0, pricing.LongContextInputMultiplier, 1e-12)
 			require.InDelta(t, 2.0, pricing.LongContextOutputMultiplier, 1e-12)
+			require.True(t, pricing.LongContextThresholdInclusive)
 			require.False(t, pricing.SupportsCacheBreakdown)
 		})
 	}
@@ -1361,6 +1362,29 @@ func TestGetModelPricing_GrokOfficialFamilyCards(t *testing.T) {
 		require.InDelta(t, tc.output, p.OutputPricePerToken, 1e-12)
 		require.Equal(t, 200000, p.LongContextInputThreshold)
 	}
+}
+
+func TestCalculateCostUnified_Grok46CatalogLongContextIncludesCache(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, newStubPricingServiceFromJSON(t, `{
+		"grok-4.6": {"litellm_provider": "xai", "mode": "chat",
+			"input_cost_per_token": 2e-06, "output_cost_per_token": 6e-06,
+			"cache_read_input_token_cost": 5e-07,
+			"input_cost_per_token_above_200k_tokens": 4e-06,
+			"output_cost_per_token_above_200k_tokens": 1.2e-05,
+			"cache_read_input_token_cost_above_200k_tokens": 1e-06}
+	}`))
+	resolver := NewModelPricingResolver(nil, svc)
+	tokens := UsageTokens{InputTokens: 10000, CacheReadTokens: 190000, OutputTokens: 1000}
+
+	cost, err := svc.CalculateCostUnified(CostInput{
+		Model: "grok-4.6", Group: &Group{LongContextPricingEnabled: true},
+		Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
+	})
+	require.NoError(t, err)
+	require.True(t, cost.LongContextBillingApplied)
+	require.InDelta(t, 10000*4e-6, cost.InputCost, 1e-12)
+	require.InDelta(t, 190000*1e-6, cost.CacheReadCost, 1e-12)
+	require.InDelta(t, 1000*1.2e-5, cost.OutputCost, 1e-12)
 }
 
 func TestCalculateCostUnified_GroupLongContextToggleUsesPresetLadder(t *testing.T) {

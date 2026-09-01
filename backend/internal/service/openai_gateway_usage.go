@@ -304,6 +304,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			}
 		}
 	}
+	applyGrokUpstreamReportedCost(account, result.Usage, cost, multiplier)
 
 	// Free Fast changes only the customer charge. Keep priority TotalCost and
 	// service_tier for upstream accounting, but evaluate ActualCost once more at

@@ -174,6 +174,15 @@ func TestMergeBillingProbeResultRetainsFailedWindow(t *testing.T) {
 	require.Equal(t, []string{"monthly"}, previous.FailedWindows)
 }
 
+func TestCostUSDFromTicks(t *testing.T) {
+	t.Parallel()
+	_, ok := CostUSDFromTicks(0)
+	require.False(t, ok)
+	usd, ok := CostUSDFromTicks(37_756_000)
+	require.True(t, ok)
+	require.InDelta(t, 0.0037756, usd, 1e-12)
+}
+
 func floatPointer(value float64) *float64 {
 	return &value
 }
