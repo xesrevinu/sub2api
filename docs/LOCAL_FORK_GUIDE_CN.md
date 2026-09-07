@@ -624,6 +624,28 @@ Docker 状态：未重启
 遗留问题：k8s 仍跑 rebase 前镜像 sub2api-local:23276556c-amd64，需部署后 LiteLLM above_200k 折算和 ticks 才会进线上 usage_logs
 ```
 
+```text
+日期：2026-09-07
+上游：Wei-Shaw/sub2api origin/main @ ab99d56e9 (v0.2.1)
+本地合并提交：rebase origin/main（backup/pre-upstream-rebase-20260907）
+        53ae8869d feat(grok): bill long-context cache and xAI cost ticks
+冲突文件：
+  - openai_gateway_grok.go（保留上游 UpstreamHeaders；保留 fork 的 outbound ServiceTier / UpstreamResponseServiceTier，经 resolvedOpenAIUpstreamServiceTier 写入）
+保留的本地功能：
+  - /api/relay/openai passthrough + openai-compact 优先
+  - Grok Build 身份/TLS + 账号级 force Priority
+  - Cursor cursor-* 价目 / 通配符捕获 mapping / 计费候选优先
+  - Grok 上游 cost_in_usd_ticks 覆盖 TotalCost/ActualCost（见第 16 节）
+构建镜像：未构建（等确认后再更新 k8s）
+Docker 状态：未重启
+验证结果：
+  go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint ./internal/repository ./internal/service ./internal/handler -run 'Grok|CLI|UpstreamHeaders|BuildGrok|ForcePriority|TestOpenAI|CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult|CostUSDFromTicks|OpenAIUsageFromGJSONParsesCostInUsdTicks|ApplyGrokUpstreamReportedCost|StampsCustomAPIKeySessionID' 通过
+  go test ./internal/service ./internal/handler 通过
+遗留问题：
+  - 工作区仍有未提交的 stampCustomOpenAIAPIKeySessionID（自定义 OpenAI api_key 的 session_id 粘性）
+  - k8s / 本地 Docker 镜像仍是 rebase 前版本，需确认后再部署
+```
+
 ## 16. Grok Build 自用额度（2026-09-01）
 
 Grok OAuth 走 `cli-chat-proxy` 的 **GrokBuild 周 credits**，不是向用户售卖。官方价卡（https://docs.x.ai/developers/pricing）：
