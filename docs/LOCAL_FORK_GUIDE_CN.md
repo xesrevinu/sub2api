@@ -646,6 +646,33 @@ Docker 状态：未重启
   - k8s / 本地 Docker 镜像仍是 rebase 前版本，需确认后再部署
 ```
 
+```text
+日期：2026-09-17
+上游：Wei-Shaw/sub2api origin/main @ efe9aab1e (v0.2.5)
+本地合并提交：rebase origin/main（backup/pre-upstream-rebase-20260917）
+冲突文件：
+  - gateway.go（保留 fork 的 /api/relay/openai Any 注册；embeddings 改用上游 rootRoute）
+  - billing_service.go（保留上游 Gemini 3.7/3.8 Flash 兜底 + fork 的 GPT-5.4 等 relay fallback）
+  - openai_gateway_chat_completions_raw.go（sanitizeGrokUnsupportedFields 之后再 applyGrokForcePriority；Ollama clamp 之后再 extract service_tier）
+  - openai_gateway_usage.go（Cursor 用 inputTokensForBilling；保留上游 ImageCacheReadTokens 拆分）
+  - openai_gateway_service.go（保留 ImageCacheReadTokens + CostInUsdTicks）
+  - EditAccountModal.vue / en|zh accounts.ts（保留上游 grokMediaEligibility + fork 的 grokForcePriority）
+保留的本地功能：
+  - /api/relay/openai passthrough + openai-compact 优先
+  - Grok Build 身份/TLS + 账号级 force Priority
+  - Cursor cursor-* 价目 / 通配符捕获 mapping / 计费候选优先
+  - Grok 上游 cost_in_usd_ticks 覆盖 TotalCost/ActualCost（见第 16 节）
+构建镜像：未构建（等确认后再更新 k8s）
+Docker 状态：未重启
+验证结果：
+  go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint 通过
+  go test ./internal/repository ./internal/service 通过
+  go test ./internal/handler 通过
+  go test ./internal/service ./internal/handler -run 'Grok|CLI|UpstreamHeaders|BuildGrok|ForcePriority|TestOpenAI|CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult|CostUSDFromTicks|OpenAIUsageFromGJSONParsesCostInUsdTicks|ApplyGrokUpstreamReportedCost|StampsCustomAPIKeySessionID' 通过
+遗留问题：
+  - k8s / 本地 Docker 镜像仍是 rebase 前版本，需确认后再部署
+```
+
 ## 16. Grok Build 自用额度（2026-09-01）
 
 Grok OAuth 走 `cli-chat-proxy` 的 **GrokBuild 周 credits**，不是向用户售卖。官方价卡（https://docs.x.ai/developers/pricing）：
