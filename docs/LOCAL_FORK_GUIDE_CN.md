@@ -1,6 +1,6 @@
 # 本地 Fork 维护说明
 
-> 本文是本地 fork 的唯一说明：相对上游 `Wei-Shaw/sub2api` 的定制、同步升级、验证和重建本地镜像都写在这里。
+> 本文是本地 fork 的唯一说明：相对上游 `Wei-Shaw/sub2api` 的定制、同步升级、验证、本地镜像和 **hk-edge k8s 部署**都写在这里。生产部署见第 6.4 节。
 
 ## 1. 背景
 
@@ -186,18 +186,19 @@ GOLANG_IMAGE: public.ecr.aws/docker/library/golang:1.27.0-alpine
 
 ## 6. 本地重建与重启
 
-当前本地运行使用的是：
+本地 Docker Compose 只用于本机调试。**当前线上**是 k8s `default/sub2api`（见 6.4），不要把 `weishaw/sub2api:latest` 当成生产 tag。
 
-- 运行编排：`deploy/docker-compose.local.yml`
-- 构建编排：`deploy/docker-compose.build.local.yml`
-- 运行镜像 tag：`weishaw/sub2api:latest`
+本机 compose 现状：
 
-推荐流程：
+- 运行/构建编排：`deploy/docker-compose.local.yml`（内含 `build:`；`deploy/docker-compose.build.local.yml` 已不存在）
+- 本机构建 tag：`sub2api-local:${SUB2API_BUILD_VERSION:-local}`
+
+本机调试推荐流程：
 
 ### 6.1 重建镜像
 
 ```bash
-docker compose -f deploy/docker-compose.build.local.yml build sub2api
+docker compose -f deploy/docker-compose.local.yml build sub2api
 ```
 
 构建完成后，实际生成的 tag 可能是：
@@ -232,6 +233,79 @@ docker compose -f deploy/docker-compose.local.yml up -d --build sub2api
 ```
 
 期望 `sub2api` 状态是 `Up ... (healthy)`，端口仍是 `127.0.0.1:8088->8080/tcp`。
+
+### 6.4 生产 k8s 部署（hk-edge / vmiss-hk）
+
+这是 fork 当前唯一的生产路径。Deployment 在 OrbStack 控制面，Pod 跑在 `hk-edge-1`（VMiss HK，k3s agent）。
+
+| 项 | 值 |
+|---|---|
+| kubectl context | `orbstack` |
+| namespace / deploy | `default/sub2api` |
+| 容器名 | `sub2api` |
+| 镜像 | `sub2api-local:<9 位 sha>-amd64` |
+| `imagePullPolicy` | `Never`（必须先把镜像导入节点 containerd） |
+| 节点 | `hk-edge-1`，`nodeSelector: node.kee.dev/role=hk-edge` |
+| SSH | `vmiss-hk` → `root@100.123.3.103`（`~/.ssh/config`） |
+| 网络 | `hostNetwork: true`，`SERVER_HOST=100.123.3.103`，`SERVER_PORT=8088` |
+| 策略 | `Recreate`，`terminationGracePeriodSeconds: 930` |
+| 健康检查 | `http://100.123.3.103:8088/health` |
+| 配套 | `default/sub2api-redis`（不要随网关一起重建） |
+
+一键：
+
+```bash
+./deploy/k8s-hk-edge.sh
+```
+
+脚本会：临时去掉本机 Docker `osxkeychain`（避免非交互构建被锁钥匙串）、用 `public.ecr.aws` 基础镜像交叉编译 `linux/amd64`、`docker save` 经 SSH 导入 `k3s ctr`、`kubectl set image`、等 rollout、打 health。
+
+手工等价步骤：
+
+```bash
+SHA="$(git rev-parse --short=9 HEAD)"
+IMAGE="sub2api-local:${SHA}-amd64"
+
+# 1) 构建。Dockerfile 第一行 # syntax=docker/dockerfile:1.7 会拉 docker.io，
+#    钥匙串锁住时先 tail -n +2 Dockerfile > Dockerfile.syntaxless 再用 -f。
+#    GOPROXY 必须走 goproxy.cn；基础镜像用 public.ecr.aws，不要 docker.io。
+docker build --platform linux/amd64 \
+  --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine \
+  --build-arg GOLANG_IMAGE=public.ecr.aws/docker/library/golang:1.27.0-alpine \
+  --build-arg ALPINE_IMAGE=public.ecr.aws/docker/library/alpine:3.21 \
+  --build-arg POSTGRES_IMAGE=public.ecr.aws/docker/library/postgres:18-alpine \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  --build-arg GOSUMDB=sum.golang.google.cn \
+  --build-arg NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+  --build-arg VERSION="local-${SHA}" \
+  --build-arg COMMIT="${SHA}" \
+  -t "${IMAGE}" \
+  -f Dockerfile .
+
+# 2) 导入 hk-edge 的 k3s（imagePullPolicy=Never，不走仓库）
+docker save "${IMAGE}" | ssh vmiss-hk 'k3s ctr images import -'
+ssh vmiss-hk "k3s ctr images ls | awk '/${SHA}-amd64/'"
+
+# 3) 滚动。Recreate：先删旧 Pod 再起新的。
+kubectl -n default set image deployment/sub2api "sub2api=${IMAGE}"
+kubectl -n default rollout status deployment/sub2api --timeout=960s
+
+# 4) 确认
+kubectl -n default get pod -l app=sub2api,component=gateway -o wide
+curl -sS -m 8 -D - http://100.123.3.103:8088/health
+```
+
+导入成功后 `k3s ctr images ls` 里应看到 `docker.io/library/sub2api-local:<sha>-amd64`。
+
+**不要**把镜像 `docker push` 到 Docker Hub，也**不要** `git push origin`（`origin` 是上游 `Wei-Shaw/sub2api`）。本 fork 只推 `fork`：
+
+```bash
+git fetch fork
+git push --force-with-lease fork main
+```
+
+rebase 上游后本地历史已改写，推自己的 fork 必须 `--force-with-lease`。lease 对不上就停下来核对 `fork/main`，不要改成裸 `--force`。
+
 
 ## 7. 本地验证方法
 
@@ -662,15 +736,15 @@ Docker 状态：未重启
   - Grok Build 身份/TLS + 账号级 force Priority
   - Cursor cursor-* 价目 / 通配符捕获 mapping / 计费候选优先
   - Grok 上游 cost_in_usd_ticks 覆盖 TotalCost/ActualCost（见第 16 节）
-构建镜像：未构建（等确认后再更新 k8s）
-Docker 状态：未重启
+构建镜像：sub2api-local:d2bb8d6be-amd64（linux/amd64，含 grok-4.7）
+Docker 状态：k8s default/sub2api Recreate 到 hk-edge-1；health 200
 验证结果：
   go test ./internal/pkg/xai ./internal/pkg/tlsfingerprint 通过
   go test ./internal/repository ./internal/service 通过
   go test ./internal/handler 通过
   go test ./internal/service ./internal/handler -run 'Grok|CLI|UpstreamHeaders|BuildGrok|ForcePriority|TestOpenAI|CursorPrefixed|UnprefixedGrokComposer|StripsCursor|PrefersCursor|GrokCatalogFallbacks|MatchWildcardMappingResult|CostUSDFromTicks|OpenAIUsageFromGJSONParsesCostInUsdTicks|ApplyGrokUpstreamReportedCost|StampsCustomAPIKeySessionID' 通过
-遗留问题：
-  - k8s / 本地 Docker 镜像仍是 rebase 前版本，需确认后再部署
+  curl http://100.123.3.103:8088/health → {"status":"ok"}
+遗留问题：无（部署步骤见第 6.4 节 / deploy/k8s-hk-edge.sh）
 ```
 
 ## 16. Grok Build 自用额度（2026-09-01）
