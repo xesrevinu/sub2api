@@ -19,6 +19,7 @@ type cursorListCost struct {
 const cursorFastCostMultiplier = 2.0
 
 var cursorListPrices = map[string]cursorListCost{
+	"grok-4.7":             {input: 2, output: 6, cacheRead: 0.5},
 	"grok-4.6":             {input: 2, output: 6, cacheRead: 0.5},
 	"grok-4.5":             {input: 2, output: 6, cacheRead: 0.5},
 	"grok-4.5-fast":        {input: 4, output: 18, cacheRead: 1},
@@ -175,10 +176,10 @@ func normalizeCursorBillingTokens(model string, tokens UsageTokens) UsageTokens 
 	cacheCreation := maxInt(0, tokens.CacheCreationTokens)
 	out := UsageTokens{
 		OutputTokens:          maxInt(0, tokens.OutputTokens),
-		CacheCreation5mTokens:   maxInt(0, tokens.CacheCreation5mTokens),
-		CacheCreation1hTokens:   maxInt(0, tokens.CacheCreation1hTokens),
-		ImageInputTokens:        maxInt(0, tokens.ImageInputTokens),
-		ImageOutputTokens:       maxInt(0, tokens.ImageOutputTokens),
+		CacheCreation5mTokens: maxInt(0, tokens.CacheCreation5mTokens),
+		CacheCreation1hTokens: maxInt(0, tokens.CacheCreation1hTokens),
+		ImageInputTokens:      maxInt(0, tokens.ImageInputTokens),
+		ImageOutputTokens:     maxInt(0, tokens.ImageOutputTokens),
 	}
 	if cursorSeriesUsesDisjointInputBuckets(series) {
 		out.InputTokens = input

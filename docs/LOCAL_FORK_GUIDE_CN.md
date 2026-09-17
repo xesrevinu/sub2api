@@ -678,6 +678,7 @@ Docker 状态：未重启
 Grok OAuth 走 `cli-chat-proxy` 的 **GrokBuild 周 credits**，不是向用户售卖。官方价卡（https://docs.x.ai/developers/pricing）：
 
 - grok-4.6：prompt < 200k 时 $2 / $0.50 cached / $6；含 cache 的 prompt ≥200k 时整单 2x
+- grok-4.7：官方价卡未公布；本 fork 先按 grok-4.6 同卡计费，并挂目录/别名/`xhigh`（`grok-4.7` / `grok-4.7-latest` / `grok-4.7-beta`）
 - cache 单独按 cached input 计价，不是免单
 - 响应 `usage.cost_in_usd_ticks`（1 USD = 10^10 ticks）是单次真实扣费
 

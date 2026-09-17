@@ -21,6 +21,8 @@ func TestGetModelPricing_CursorPrefixedUsesCursorListPrices(t *testing.T) {
 		{model: "cursor-composer-2.5", input: 0.5e-6, output: 2.5e-6, cacheRead: 0.2e-6},
 		{model: "cursor-composer-2.5-fast", input: 3e-6, output: 15e-6, cacheRead: 0.5e-6},
 		{model: "cursor-grok-4.6", input: 2e-6, output: 6e-6, cacheRead: 0.5e-6},
+		{model: "cursor-grok-4.7", input: 2e-6, output: 6e-6, cacheRead: 0.5e-6},
+		{model: "cursor-grok-4.7-fast", input: 4e-6, output: 12e-6, cacheRead: 1e-6},
 		{model: "cursor-grok-4.6-fast", input: 4e-6, output: 12e-6, cacheRead: 1e-6},
 		{model: "cursor-grok-4.5-fast", input: 4e-6, output: 18e-6, cacheRead: 1e-6},
 		{model: "cursor-gpt-5.4-mini-fast", input: 1.5e-6, output: 9e-6, cacheRead: 0.15e-6},
@@ -97,9 +99,9 @@ func TestNormalizeCursorBillingTokens_ClaudeUsesDisjointBuckets(t *testing.T) {
 
 func TestNormalizeCursorBillingTokens_CodexMergesDisjointCounters(t *testing.T) {
 	tokens := normalizeCursorBillingTokens("cursor-gpt-5.4", UsageTokens{
-		InputTokens:         200,
-		CacheReadTokens:     800,
-		OutputTokens:        50,
+		InputTokens:     200,
+		CacheReadTokens: 800,
+		OutputTokens:    50,
 	})
 	require.Equal(t, 200, tokens.InputTokens)
 	require.Equal(t, 800, tokens.CacheReadTokens)

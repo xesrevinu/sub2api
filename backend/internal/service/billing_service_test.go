@@ -1345,6 +1345,25 @@ func TestGetModelPricing_Grok46OfficialFallback(t *testing.T) {
 	}
 }
 
+func TestGetModelPricing_Grok47UsesGrok46Card(t *testing.T) {
+	svc := newTestBillingService()
+	baseline, err := svc.GetModelPricing("grok-4.6")
+	require.NoError(t, err)
+
+	for _, model := range []string{"grok-4.7", "grok-4.7-latest", "grok-4.7-beta"} {
+		model := model
+		t.Run(model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, baseline.InputPricePerToken, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, baseline.OutputPricePerToken, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, baseline.CacheReadPricePerToken, pricing.CacheReadPricePerToken, 1e-12)
+			require.Equal(t, baseline.LongContextInputThreshold, pricing.LongContextInputThreshold)
+			require.True(t, pricing.LongContextThresholdInclusive)
+		})
+	}
+}
+
 func TestGetModelPricing_GrokOfficialFamilyCards(t *testing.T) {
 	svc := newTestBillingService()
 	for _, tc := range []struct {
@@ -1415,7 +1434,7 @@ func TestGetModelPricing_UnknownGrokTextFallsBackToGrok46(t *testing.T) {
 	baseline, err := svc.GetModelPricing("grok-4.6")
 	require.NoError(t, err)
 
-	for _, model := range []string{"grok-5", "grok-5-latest", "x-ai/grok-7", "grok-4.7-beta"} {
+	for _, model := range []string{"grok-5", "grok-5-latest", "x-ai/grok-7", "grok-4.8-beta"} {
 		pricing, err := svc.GetModelPricing(model)
 		require.NoError(t, err, "model %s", model)
 		require.InDelta(t, baseline.InputPricePerToken, pricing.InputPricePerToken, 1e-12, model)

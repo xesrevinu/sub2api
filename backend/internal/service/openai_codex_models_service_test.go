@@ -295,6 +295,13 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, "high", *grokAlias.DefaultReasoningLevel)
 	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromConfiguredCodexLevels(grokAlias.SupportedReasoningLevels))
 
+	grok47 := newConfiguredCodexModelDescriptor("grok-4.7")
+	require.Equal(t, "Grok 4.7", grok47.DisplayName)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromConfiguredCodexLevels(grok47.SupportedReasoningLevels))
+	grok47Alias := newConfiguredCodexModelDescriptor("xai/grok-4.7-latest")
+	require.Equal(t, "Grok 4.7", grok47Alias.DisplayName)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromConfiguredCodexLevels(grok47Alias.SupportedReasoningLevels))
+
 	grok45 := newConfiguredCodexModelDescriptor("grok-4.5")
 	require.Equal(t, []string{"low", "medium", "high"}, effortsFromConfiguredCodexLevels(grok45.SupportedReasoningLevels))
 
